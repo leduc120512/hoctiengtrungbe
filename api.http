@@ -1,0 +1,361 @@
+### =====================================================================
+### BO TEST API - Web hoc tieng Trung
+### Mo file nay bang IntelliJ / WebStorm roi bam nut ▶ ben trai tung request.
+### Cac request duoc sap theo dung THU TU LUONG, chay tu tren xuong.
+### =====================================================================
+
+@host = http://localhost:8080
+@api = {{host}}/api/v1
+
+### ---------------------------------------------------------------------
+### 1. XAC THUC
+### ---------------------------------------------------------------------
+
+### 1.1 Dang ky tai khoan moi
+POST {{api}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "hocvien01@example.com",
+  "username": "hocvien01",
+  "password": "MatKhau@123",
+  "displayName": "Học viên 01"
+}
+
+### 1.2 Dang nhap ADMIN -> luu token vao bien
+# @name loginAdmin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@hoctiengtrung.vn",
+  "password": "Admin@123"
+}
+
+> {%
+    client.global.set("adminToken", response.body.accessToken);
+%}
+
+### 1.3 Dang nhap DEMO -> luu token vao bien
+# @name loginDemo
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "demo@hoctiengtrung.vn",
+  "password": "Demo@123"
+}
+
+> {%
+    client.global.set("token", response.body.accessToken);
+    client.global.set("refreshToken", response.body.refreshToken);
+%}
+
+### 1.4 Thong tin tai khoan dang dang nhap
+GET {{api}}/me
+Authorization: Bearer {{token}}
+
+### 1.5 Cap nhat ho so
+PUT {{api}}/me
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "displayName": "Học viên Demo",
+  "avatarUrl": null,
+  "nativeLanguage": "vi",
+  "currentHskLevel": 2
+}
+
+### 1.6 Lam moi token (refresh token cu se bi thu hoi - rotation)
+POST {{api}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+### 1.7 Doi mat khau
+POST {{api}}/me/change-password
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "currentPassword": "Demo@123",
+  "newPassword": "MatKhauMoi@123"
+}
+
+### 1.8 Dang xuat (thu hoi 1 refresh token)
+POST {{api}}/auth/logout
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+### 1.9 Dang xuat tat ca thiet bi
+POST {{api}}/auth/logout-all
+Authorization: Bearer {{token}}
+
+
+### ---------------------------------------------------------------------
+### 2. TU VUNG / HSK   (GET la public, khong can token)
+### ---------------------------------------------------------------------
+
+### 2.1 Danh sach chu de
+GET {{api}}/topics
+
+### 2.2 Chi tiet chu de theo slug
+GET {{api}}/topics/chao-hoi
+
+### 2.3 Danh sach tu vung - phan trang
+GET {{api}}/words?page=0&size=20
+
+### 2.4 Loc theo cap HSK
+GET {{api}}/words?hskLevel=1&size=10
+
+### 2.5 Loc theo chu de
+GET {{api}}/words?topicId=2&size=10
+
+### 2.6 Tim kiem (khop Han tu, pinyin hoac nghia tieng Viet)
+GET {{api}}/words?q=hoc&size=10
+
+### 2.7 Chi tiet mot tu (kem vi du + chu de)
+GET {{api}}/words/1
+
+### 2.8 Lay tu ngau nhien de luyen tap
+GET {{api}}/words/random?count=10&hskLevel=1
+
+
+### ---------------------------------------------------------------------
+### 3. KHOA HOC / BAI HOC
+### ---------------------------------------------------------------------
+
+### 3.1 Danh sach khoa hoc
+GET {{api}}/courses
+
+### 3.2 Loc theo trinh do
+GET {{api}}/courses?level=HSK1
+
+### 3.3 Chi tiet khoa hoc theo slug (kem danh sach bai hoc)
+GET {{api}}/courses/hsk-1-co-ban
+
+### 3.4 Chi tiet bai hoc (noi dung + ngu phap + tu vung)
+GET {{api}}/lessons/1
+
+### 3.5 Ghi danh khoa hoc
+POST {{api}}/courses/1/enroll
+Authorization: Bearer {{token}}
+
+### 3.6 Danh sach khoa hoc da ghi danh
+GET {{api}}/me/enrollments
+Authorization: Bearer {{token}}
+
+### 3.7 Cap nhat tien do bai hoc
+PUT {{api}}/me/lessons/1/progress
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "status": "COMPLETED",
+  "progressPercent": 100
+}
+
+### 3.8 Tien do tong the cua khoa hoc
+GET {{api}}/me/courses/1/progress
+Authorization: Bearer {{token}}
+
+### 3.9 Huy ghi danh
+DELETE {{api}}/courses/1/enroll
+Authorization: Bearer {{token}}
+
+
+### ---------------------------------------------------------------------
+### 4. QUIZ / KIEM TRA
+### ---------------------------------------------------------------------
+
+### 4.1 Danh sach bai kiem tra
+GET {{api}}/quizzes
+
+### 4.2 Loc theo khoa hoc
+GET {{api}}/quizzes?courseId=1
+
+### 4.3 Chi tiet de thi
+### LUU Y BAO MAT: response nay KHONG chua isCorrect / correctText / explanation.
+GET {{api}}/quizzes/1
+
+### 4.4 Bat dau lam bai -> tra ve attemptId
+# @name startAttempt
+POST {{api}}/quizzes/1/attempts
+Authorization: Bearer {{token}}
+
+> {%
+    client.global.set("attemptId", response.body.id);
+%}
+
+### 4.5 Nop bai
+### Dap an chi la vi du - hay lay questionId / optionId that tu request 4.3.
+POST {{api}}/me/attempts/{{attemptId}}/submit
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "answers": [
+    { "questionId": 1, "selectedOptionId": 1 },
+    { "questionId": 3, "textAnswer": "是" }
+  ]
+}
+
+### 4.6 Lich su lam bai
+GET {{api}}/me/attempts
+Authorization: Bearer {{token}}
+
+### 4.7 Xem lai ket qua mot lan lam bai (luc nay MOI lo dap an + giai thich)
+GET {{api}}/me/attempts/{{attemptId}}
+Authorization: Bearer {{token}}
+
+
+### ---------------------------------------------------------------------
+### 5. FLASHCARD + SRS (on tap ngat quang SM-2)
+### ---------------------------------------------------------------------
+
+### 5.1 Danh sach bo the
+GET {{api}}/decks
+Authorization: Bearer {{token}}
+
+### 5.2 Loc bo the theo cap HSK
+GET {{api}}/decks?hskLevel=1
+
+### 5.3 Danh sach the trong bo
+GET {{api}}/decks/3/cards?size=20
+
+### 5.4 Dang ky hoc bo the (tao lich on tap - goi nhieu lan van an toan)
+POST {{api}}/decks/3/subscribe
+Authorization: Bearer {{token}}
+
+### 5.5 Lay cac the DEN HAN on hom nay
+GET {{api}}/me/srs/due?limit=20
+Authorization: Bearer {{token}}
+
+### 5.6 Cham diem mot the
+### rating: AGAIN (quen) | HARD (kho) | GOOD (nho) | EASY (de)
+POST {{api}}/me/srs/review
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "flashcardId": 511,
+  "rating": "GOOD"
+}
+
+### 5.7 Thong ke hoc tap
+GET {{api}}/me/srs/stats
+Authorization: Bearer {{token}}
+
+### 5.8 Tao bo the rieng
+POST {{api}}/decks
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Bộ thẻ của tôi",
+  "description": "Những từ tôi hay quên",
+  "isPublic": false,
+  "hskLevel": 1
+}
+
+
+### ---------------------------------------------------------------------
+### 6. QUAN TRI (can ROLE_ADMIN - dung {{adminToken}})
+### ---------------------------------------------------------------------
+
+### 6.1 Them tu vung moi
+POST {{api}}/admin/words
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "simplified": "苹果",
+  "traditional": "蘋果",
+  "pinyin": "píngguǒ",
+  "pinyinNumbered": "ping2 guo3",
+  "meaningVi": "quả táo",
+  "meaningEn": "apple",
+  "partOfSpeech": "danh từ",
+  "hskLevel": 1,
+  "topicIds": [6]
+}
+
+### 6.2 Them chu de
+POST {{api}}/admin/topics
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "slug": "the-thao",
+  "nameVi": "Thể thao",
+  "nameZh": "运动",
+  "description": "Từ vựng về thể thao",
+  "sortOrder": 20
+}
+
+### 6.3 Tao khoa hoc
+POST {{api}}/admin/courses
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "slug": "khoa-hoc-moi",
+  "title": "Khóa học mới",
+  "description": "Mô tả khóa học",
+  "level": "HSK1",
+  "published": false,
+  "sortOrder": 10
+}
+
+### 6.4 KIEM TRA PHAN QUYEN: user thuong goi API admin -> phai tra 403
+POST {{api}}/admin/topics
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "slug": "khong-duoc-phep",
+  "nameVi": "Không được phép"
+}
+
+
+### ---------------------------------------------------------------------
+### 7. CAC TRUONG HOP LOI (kiem tra chuan RFC 7807 ProblemDetail)
+### ---------------------------------------------------------------------
+
+### 7.1 Khong co token -> 401
+GET {{api}}/me
+
+### 7.2 Token rac -> 401
+GET {{api}}/me
+Authorization: Bearer day-khong-phai-jwt
+
+### 7.3 Khong tim thay -> 404
+GET {{api}}/words/999999
+
+### 7.4 Du lieu khong hop le -> 400 kem map "errors"
+POST {{api}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "khong-phai-email",
+  "username": "a",
+  "password": "123"
+}
+
+### 7.5 Trung email -> 409
+POST {{api}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "demo@hoctiengtrung.vn",
+  "username": "trungemail",
+  "password": "MatKhau@123",
+  "displayName": "Trùng email"
+}
