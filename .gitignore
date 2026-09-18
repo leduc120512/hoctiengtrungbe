@@ -31,3 +31,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Bien moi truong that cho Render - chua mat khau, KHONG commit
+render.env
