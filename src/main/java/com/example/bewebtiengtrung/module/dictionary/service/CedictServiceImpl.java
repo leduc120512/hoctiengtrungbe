@@ -29,6 +29,8 @@ import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 
 /**
@@ -65,11 +67,49 @@ public class CedictServiceImpl implements CedictService {
     private Map<String, List<CedictEntry>> byEnglishWord = Map.of();
     private int size;
 
+    /**
+     * Mở khoá khi từ điển đã nạp xong. Nạp chạy ở luồng nền để cổng HTTP mở sớm (trên máy chủ CPU 0.1
+     * việc nạp mất ~30 s); các phép tra chờ ở {@link #awaitLoaded()} nếu được gọi trước lúc đó.
+     */
+    private final CountDownLatch loaded = new CountDownLatch(1);
+    private volatile RuntimeException loadFailure;
+
     /** Cache tập chữ giản thể có trong bảng words (để xếp hạng), làm mới mỗi 10 phút. */
     private volatile Set<String> systemWords = Set.of();
     private volatile Instant systemWordsLoadedAt = Instant.EPOCH;
 
     @PostConstruct
+    void startLoading() {
+        Thread t = new Thread(() -> {
+            try {
+                load();
+            } catch (RuntimeException e) {
+                loadFailure = e;
+                log.error("Nạp CC-CEDICT thất bại: {}", e.getMessage());
+            } finally {
+                loaded.countDown();
+            }
+        }, "cedict-loader");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** Chờ từ điển nạp xong (tối đa 3 phút); ném lỗi nếu nạp thất bại. Dùng được trong test đồng bộ. */
+    void awaitLoaded() {
+        try {
+            if (!loaded.await(3, TimeUnit.MINUTES)) {
+                throw new IllegalStateException("Từ điển CC-CEDICT chưa nạp xong, thử lại sau");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Bị ngắt khi chờ nạp từ điển", e);
+        }
+        if (loadFailure != null) {
+            throw loadFailure;
+        }
+    }
+
+    /** Nạp đồng bộ — gọi trực tiếp trong test; ở runtime được {@link #startLoading()} gọi ở luồng nền. */
     void load() {
         long started = System.nanoTime();
         Map<String, List<CedictEntry>> simp = new HashMap<>(160_000);
@@ -111,6 +151,8 @@ public class CedictServiceImpl implements CedictService {
         byPinyinKey = pin;
         byEnglishWord = eng;
         size = count;
+        // Mở khoá ngay tại đây để cả đường nạp nền lẫn gọi đồng bộ trong test đều dùng được.
+        loaded.countDown();
         log.info("Đã nạp CC-CEDICT: {} mục, {} khoá pinyin, {} từ tiếng Anh, {} ms",
                 count, pin.size(), eng.size(), (System.nanoTime() - started) / 1_000_000);
     }
@@ -135,6 +177,7 @@ public class CedictServiceImpl implements CedictService {
 
     @Override
     public List<CedictEntry> lookupSimplified(String simplified) {
+        awaitLoaded();
         if (simplified == null || simplified.isBlank()) {
             return List.of();
         }
@@ -144,6 +187,7 @@ public class CedictServiceImpl implements CedictService {
 
     @Override
     public List<CedictEntry> reverseLookup(String pinyin, int limit) {
+        awaitLoaded();
         String key = PinyinUtils.normalizeKey(pinyin);
         if (key.isEmpty()) {
             return List.of();
@@ -161,6 +205,7 @@ public class CedictServiceImpl implements CedictService {
 
     @Override
     public List<CedictEntry> search(String q, int limit) {
+        awaitLoaded();
         if (q == null || q.isBlank()) {
             return List.of();
         }
@@ -278,6 +323,7 @@ public class CedictServiceImpl implements CedictService {
 
     @Override
     public int size() {
+        awaitLoaded();
         return size;
     }
 

@@ -22,6 +22,8 @@ services:
         sync: false
       - key: DB_POOL_SIZE
         value: "5"
+      - key: HIBERNATE_DDL_AUTO      # none tren production: Flyway da dam bao schema, bo validate qua DB o xa
+        value: none
       - key: JWT_SECRET
         generateValue: true  # Render tu sinh chuoi ngau nhien du dai
       - key: ADMIN_PASSWORD        # BAT BUOC: mat khau moi cho admin@hoctiengtrung.vn (>= 8 ky tu)
@@ -41,4 +43,4 @@ services:
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
       - key: JAVA_OPTS
-        value: -XX:MaxRAMPercentage=75 -XX:+UseSerialGC
+        value: -XX:MaxRAMPercentage=75 -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k
