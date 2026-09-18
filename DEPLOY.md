@@ -104,7 +104,7 @@ Vào **Câu của tôi** → thấy form đăng nhập là đúng (chưa nối C
    (URL Vercel thật của bạn, không có `/` cuối; nếu gắn domain riêng thì thêm vào, cách nhau dấu phẩy.)
 2. **Save Changes** → Render tự khởi động lại (~1 phút).
 
-**Kiểm tra:** trang Vercel → **Câu của tôi** → đăng nhập `admin@hoctiengtrung.vn` + mật khẩu mới
+**Kiểm tra:** trang Vercel → **Câu của tôi** → trang tự vào bằng tài khoản khách `1111`; bấm **Dùng tài khoản của tôi (2222)**
 → thấy **89 từ đã học** và **90 câu**. Bấm nút tìm kiếm cạnh ⚙ (hoặc Ctrl/⌘+K), gõ `school` → thấy 学校.
 
 ---
@@ -153,6 +153,6 @@ Thêm bảng/dữ liệu ⇒ viết `V17__...sql` mới trong `src/main/resource
 | Render log `Communications link failure` | `DB_URL` sai host/port hoặc thiếu `sslMode=REQUIRED` | Sửa `DB_URL`, Save |
 | FE báo "Không kết nối được máy chủ" | BE đang ngủ (Free) hoặc `VITE_API_URL` sai | Đợi 60 s rồi thử lại; kiểm tra biến trên Vercel rồi **Redeploy** |
 | Đăng nhập lỗi CORS trong Console | `CORS_ALLOWED_ORIGINS` thiếu URL Vercel | Bước 4 |
-| Log Render có dòng `CẢNH BÁO BẢO MẬT` | chưa đặt `ADMIN_PASSWORD` | Đặt biến, Save |
+| Đăng nhập 2222/2222 báo sai | trên Render còn biến `ADMIN_PASSWORD` (app đổi mật khẩu theo nó) | Xoá biến `ADMIN_PASSWORD`, Save, đợi khởi động lại |
 | `/ai/status` báo `enabled:false` | thiếu `GEMINI_API_KEY` | Bước 5 |
 | Tạo câu trả 429 | hết hạn mức free của Gemini | chờ vài phút |
