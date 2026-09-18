@@ -42,7 +42,8 @@ import java.util.Set;
  * Cài đặt nghiệp vụ "Câu của tôi".
  *
  * <p>Điểm mấu chốt là pipeline {@link #generate}: mọi câu AI trả về đều phải qua bộ lọc
- * {@link SentenceText#unknownChars} (chỉ dùng chữ đã học) và chống trùng theo {@code hanzi_key};
+ * {@link SentenceText#unknownChars} (chỉ dùng chữ đã học), chống trùng theo {@code hanzi_key} và chống
+ * "đổi chỗ" theo {@link SentenceText#bagKey} (cùng bộ chữ với câu đã có thì không phải câu mới);
  * nếu sau lọc còn dưới 60% số câu yêu cầu thì gọi AI thêm đúng MỘT lần nữa.</p>
  */
 @Service
@@ -206,14 +207,19 @@ public class SentenceServiceImpl implements SentenceService {
         Set<Integer> learned = SentenceText.learnedCodePoints(
                 words.stream().map(LearnedWordBrief::hanzi).toList());
 
-        // 2. Câu đã có: khoá để chống trùng + chữ Hán để gửi kèm "đừng tạo lại".
+        // 2. Câu đã có: khoá để chống trùng, túi chữ để chống "đổi chỗ", chữ Hán để gửi kèm "đừng tạo lại".
         Set<String> seenKeys = new HashSet<>(sentenceRepository.findHanziKeysByUserId(userId));
+        Set<String> seenBags = new HashSet<>();
+        for (String key : seenKeys) {
+            seenBags.add(SentenceText.bagKey(key));
+        }
         List<String> avoidHanzi = new ArrayList<>(sentenceRepository.findHanziByUserId(userId));
 
         int count = request.count();
         List<GeneratedSentence> accepted = new ArrayList<>();
         int rejected = 0;
         int duplicates = 0;
+        int reordered = 0;
         List<String> rejectedSamples = new ArrayList<>();
 
         // 3–5. Gọi AI, lọc; gọi lại tối đa một lần nếu còn thiếu nhiều.
@@ -241,10 +247,17 @@ public class SentenceServiceImpl implements SentenceService {
                     addSample(rejectedSamples, hanzi, "lạ: " + String.join("", unknown));
                     continue;
                 }
-                if (!seenKeys.add(key)) {
+                if (seenKeys.contains(key)) {
                     duplicates++;
                     continue;
                 }
+                // Cùng bộ chữ với một câu đã có (hoặc câu vừa nhận trong đợt) = câu cũ đổi chỗ, không phải câu mới.
+                if (!seenBags.add(SentenceText.bagKey(key))) {
+                    reordered++;
+                    addSample(rejectedSamples, hanzi, "đổi chỗ câu đã có");
+                    continue;
+                }
+                seenKeys.add(key);
                 accepted.add(candidate);
                 avoidHanzi.add(hanzi);
             }
@@ -287,9 +300,9 @@ public class SentenceServiceImpl implements SentenceService {
         }
         List<SentenceResponse> responses = saved.stream().map(sentenceMapper::toResponse).toList();
 
-        log.info("AI sinh câu cho user {}: yêu cầu {}, lưu {}, loại {} (chữ lạ), trùng {}, {} lần gọi",
-                userId, count, saved.size(), rejected, duplicates, calls);
-        return new GenerateSentencesResponse(count, saved.size(), rejected, duplicates,
+        log.info("AI sinh câu cho user {}: yêu cầu {}, lưu {}, loại {} (chữ lạ), trùng {}, đổi chỗ {}, {} lần gọi",
+                userId, count, saved.size(), rejected, duplicates, reordered, calls);
+        return new GenerateSentencesResponse(count, saved.size(), rejected, duplicates, reordered,
                 responses, List.copyOf(rejectedSamples), aiGenerator.model());
     }
 

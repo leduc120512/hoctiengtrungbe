@@ -1,15 +1,20 @@
 package com.example.bewebtiengtrung.module.wordimport.service;
 
 import com.example.bewebtiengtrung.common.exception.ApiException;
+import com.example.bewebtiengtrung.module.ai.dto.CompletedWord;
+import com.example.bewebtiengtrung.module.ai.service.AiWordCompleter;
 import com.example.bewebtiengtrung.module.dictionary.service.CedictEntry;
 import com.example.bewebtiengtrung.module.dictionary.service.CedictService;
 import com.example.bewebtiengtrung.module.dictionary.service.PinyinUtils;
+import com.example.bewebtiengtrung.module.userword.dto.UserWordResponse;
 import com.example.bewebtiengtrung.module.userword.entity.UserWordStatus;
 import com.example.bewebtiengtrung.module.userword.service.UserWordService;
 import com.example.bewebtiengtrung.module.vocabulary.entity.Word;
 import com.example.bewebtiengtrung.module.wordimport.dto.DictionarySenseResponse;
 import com.example.bewebtiengtrung.module.wordimport.dto.ExistingWordBrief;
 import com.example.bewebtiengtrung.module.wordimport.dto.ImportAction;
+import com.example.bewebtiengtrung.module.wordimport.dto.ImportAiRequest;
+import com.example.bewebtiengtrung.module.wordimport.dto.ImportAiResponse;
 import com.example.bewebtiengtrung.module.wordimport.dto.ImportCandidateResponse;
 import com.example.bewebtiengtrung.module.wordimport.dto.ImportConfirmRequest;
 import com.example.bewebtiengtrung.module.wordimport.dto.ImportConfirmResponse;
@@ -25,6 +30,8 @@ import com.example.bewebtiengtrung.module.wordimport.repository.ImportWordLookup
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,19 +61,25 @@ public class ImportServiceImpl implements ImportService {
     /** Số gợi ý chữ Hán tối đa khi người dùng chỉ nhập pinyin. */
     private static final int CANDIDATE_LIMIT = 8;
 
+    /** Số từ tối đa AI được trả về trong một lần điền — bằng giới hạn ô dán ở frontend. */
+    static final int MAX_AI_WORDS = 100;
+
     private final CedictService cedictService;
     private final UserWordService userWordService;
     private final ImportWordLookupRepository lookupRepository;
     private final ImportRowExecutor rowExecutor;
+    private final AiWordCompleter wordCompleter;
 
     public ImportServiceImpl(CedictService cedictService,
                              UserWordService userWordService,
                              ImportWordLookupRepository lookupRepository,
-                             ImportRowExecutor rowExecutor) {
+                             ImportRowExecutor rowExecutor,
+                             AiWordCompleter wordCompleter) {
         this.cedictService = cedictService;
         this.userWordService = userWordService;
         this.lookupRepository = lookupRepository;
         this.rowExecutor = rowExecutor;
+        this.wordCompleter = wordCompleter;
     }
 
     // ------------------------------------------------------------------
@@ -106,6 +119,65 @@ public class ImportServiceImpl implements ImportService {
         }
         ImportPreviewSummary summary = new ImportPreviewSummary(rows.size(), willCreate, existing, needsAttention, errors);
         return new ImportPreviewResponse(summary, rows);
+    }
+
+    // ------------------------------------------------------------------
+    // AI điền từ rồi preview
+    // ------------------------------------------------------------------
+
+    /**
+     * Gọi AI có thể mất hàng chục giây nên KHÔNG giữ giao dịch (và kết nối DB) suốt quá trình:
+     * {@code NOT_SUPPORTED} treo giao dịch của lớp; các truy vấn đọc trong {@link #preview} tự mở
+     * giao dịch ngắn của repository.
+     *
+     * <p>AI chỉ là người gõ hộ: kết quả đi qua đúng {@link #preview} để tra CC-CEDICT, so pinyin, đối chiếu
+     * hệ thống — AI bịa chữ hay sai thanh điệu thì bảng duyệt vẫn chỉ ra.</p>
+     */
+    @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public ImportAiResponse completeWithAi(Long userId, ImportAiRequest request) {
+        if (!wordCompleter.isEnabled()) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI_DISABLED",
+                    "Chưa cấu hình AI trên máy chủ (GEMINI_API_KEY hoặc ANTHROPIC_API_KEY)");
+        }
+        int hskLevel = request.defaultHskLevel() == null ? 1 : request.defaultHskLevel();
+
+        // Chữ Hán các từ đã học: để AI không gợi ý lại khi người học xin gợi ý.
+        List<String> learnedHanzi = userWordService
+                .list(userId, null, null, null, Pageable.unpaged())
+                .content().stream()
+                .map(UserWordResponse::simplified)
+                .toList();
+
+        List<CompletedWord> completed = wordCompleter.completeWords(request.text(), hskLevel, learnedHanzi, MAX_AI_WORDS);
+        List<ImportRowInput> rows = new ArrayList<>();
+        for (CompletedWord word : completed) {
+            if (word == null || ImportText.trimToNull(word.simplified()) == null) {
+                continue;
+            }
+            rows.add(new ImportRowInput(
+                    cap(word.simplified(), 60), cap(word.pinyin(), 120),
+                    cap(word.meaningVi(), 500), cap(word.meaningEn(), 500)));
+            if (rows.size() >= MAX_AI_WORDS) {
+                break;
+            }
+        }
+        if (rows.isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "AI_EMPTY",
+                    "AI không nhận ra từ nào trong nội dung đã dán — thử viết mỗi dòng một từ");
+        }
+        log.info("AI điền từ cho user {}: {} từ AI trả về, {} dòng đưa vào duyệt", userId, completed.size(), rows.size());
+        ImportPreviewResponse preview = preview(userId, new ImportPreviewRequest(hskLevel, null, rows));
+        return new ImportAiResponse(wordCompleter.model(), completed.size(), preview);
+    }
+
+    /** Cắt chuỗi AI trả về cho vừa cột — AI hiếm khi vượt, nhưng vượt thì đừng để confirm vỡ vì DB. */
+    private static String cap(String value, int max) {
+        String trimmed = ImportText.trimToNull(value);
+        if (trimmed == null) {
+            return null;
+        }
+        return trimmed.length() > max ? trimmed.substring(0, max) : trimmed;
     }
 
     /** Duyệt MỘT dòng theo đúng thứ tự các bước trong contract. */

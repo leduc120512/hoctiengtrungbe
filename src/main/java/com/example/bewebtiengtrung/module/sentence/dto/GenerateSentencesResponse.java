@@ -9,6 +9,7 @@ import java.util.List;
  * @param generated       số câu hợp lệ đã lưu
  * @param rejected        số ứng viên bị loại vì dùng chữ chưa học
  * @param duplicates      số ứng viên bị loại vì trùng câu đã có / trùng trong đợt
+ * @param reordered       số ứng viên bị loại vì chỉ là câu đã có (hoặc câu khác trong đợt) đổi chỗ chữ
  * @param sentences       các câu vừa lưu
  * @param rejectedSamples tối đa 5 câu bị loại kèm chữ lạ, dạng "他很高兴。 (lạ: 高兴)"
  * @param model           tên model AI đã dùng
@@ -18,6 +19,7 @@ public record GenerateSentencesResponse(
         int generated,
         int rejected,
         int duplicates,
+        int reordered,
         List<SentenceResponse> sentences,
         List<String> rejectedSamples,
         String model

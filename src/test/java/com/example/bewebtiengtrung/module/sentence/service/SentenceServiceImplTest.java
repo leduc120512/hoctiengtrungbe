@@ -201,6 +201,38 @@ class SentenceServiceImplTest {
         }
 
         @Test
+        @DisplayName("Câu chỉ là câu đã có (hoặc câu trong đợt) đổi chỗ chữ bị loại, đếm vào reordered")
+        void cau_doi_cho_bi_loai() {
+            when(aiGenerator.generate(anyList(), anyList(), anyInt(), any(), any())).thenReturn(List.of(
+                    gs("学生是我。", 1),         // 我是学生 đổi chỗ — câu đã có
+                    gs("你是老师吗？", 2),
+                    gs("老师是你吗？", 2),       // đổi chỗ câu ngay trên trong cùng đợt
+                    gs("他不是学生。", 1)));
+
+            GenerateSentencesResponse res = service.generate(USER_ID, request(2, null));
+
+            assertThat(res.generated()).isEqualTo(2);
+            assertThat(res.reordered()).isEqualTo(2);
+            assertThat(res.duplicates()).isZero();
+            assertThat(res.rejected()).isZero();
+            assertThat(res.rejectedSamples()).containsExactly(
+                    "学生是我。 (đổi chỗ câu đã có)", "老师是你吗？ (đổi chỗ câu đã có)");
+            assertThat(res.sentences()).extracting(SentenceResponse::hanzi)
+                    .containsExactly("你是老师吗？", "他不是学生。");
+        }
+
+        @Test
+        @DisplayName("Từ ưu tiên (focusWords) được chuyển nguyên vẹn cho AI")
+        void focus_words_duoc_chuyen_cho_ai() {
+            when(aiGenerator.generate(anyList(), anyList(), anyInt(), any(), any()))
+                    .thenReturn(List.of(gs("他是老师。", 1)));
+
+            service.generate(USER_ID, new GenerateSentencesRequest(1, null, List.of("老师", "学生")));
+
+            verify(aiGenerator).generate(anyList(), anyList(), eq(1), isNull(), eq(List.of("老师", "学生")));
+        }
+
+        @Test
         @DisplayName("Sau lần 1 còn dưới 60% thì gọi AI thêm đúng một lần, xin phần thiếu và tránh câu vừa tạo")
         void goi_lai_lan_hai_khi_thieu() {
             when(aiGenerator.generate(anyList(), anyList(), anyInt(), any(), any()))

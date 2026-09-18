@@ -2,6 +2,7 @@ package com.example.bewebtiengtrung.module.ai.service;
 
 import com.example.bewebtiengtrung.common.exception.ApiException;
 import com.example.bewebtiengtrung.module.ai.config.AiProperties;
+import com.example.bewebtiengtrung.module.ai.dto.CompletedWord;
 import com.example.bewebtiengtrung.module.ai.dto.GeneratedSentence;
 import com.example.bewebtiengtrung.module.ai.dto.LearnedWordBrief;
 import org.springframework.context.annotation.Primary;
@@ -18,11 +19,12 @@ import java.util.Locale;
  *   <li>{@code claude} / {@code gemini} — ép dùng một bên (tắt nếu thiếu key tương ứng);</li>
  *   <li>{@code off}    — tắt hẳn.</li>
  * </ul>
- * Là bean {@code @Primary} nên tầng service chỉ cần inject {@link AiSentenceGenerator}.
+ * Là bean {@code @Primary} nên tầng service chỉ cần inject {@link AiSentenceGenerator} hoặc
+ * {@link AiWordCompleter}; cả hai việc (sinh câu, điền từ) đi cùng một provider.
  */
 @Service
 @Primary
-public class AiSentenceGeneratorRouter implements AiSentenceGenerator {
+public class AiSentenceGeneratorRouter implements AiSentenceGenerator, AiWordCompleter {
 
     /** Tên provider đang hoạt động, dùng cho {@code /api/v1/ai/status}. */
     public enum Provider { CLAUDE, GEMINI, NONE }
@@ -89,5 +91,18 @@ public class AiSentenceGeneratorRouter implements AiSentenceGenerator {
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI_DISABLED", disabledReason());
         }
         return target.generate(words, avoidHanzi, count, level, focusWords);
+    }
+
+    @Override
+    public List<CompletedWord> completeWords(String text, int hskLevel, List<String> learnedHanzi, int maxWords) {
+        AiWordCompleter target = switch (activeProvider()) {
+            case CLAUDE -> claude;
+            case GEMINI -> gemini;
+            case NONE -> null;
+        };
+        if (target == null) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI_DISABLED", disabledReason());
+        }
+        return target.completeWords(text, hskLevel, learnedHanzi, maxWords);
     }
 }

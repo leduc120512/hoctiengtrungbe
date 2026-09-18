@@ -1,12 +1,19 @@
 package com.example.bewebtiengtrung.module.wordimport.service;
 
+import com.example.bewebtiengtrung.common.dto.PageResponse;
+import com.example.bewebtiengtrung.common.exception.ApiException;
 import com.example.bewebtiengtrung.common.exception.ConflictException;
+import com.example.bewebtiengtrung.module.ai.dto.CompletedWord;
+import com.example.bewebtiengtrung.module.ai.service.AiWordCompleter;
 import com.example.bewebtiengtrung.module.dictionary.service.CedictEntry;
 import com.example.bewebtiengtrung.module.dictionary.service.CedictService;
 import com.example.bewebtiengtrung.module.userword.entity.UserWordStatus;
 import com.example.bewebtiengtrung.module.userword.service.UserWordService;
 import com.example.bewebtiengtrung.module.vocabulary.entity.Word;
+import com.example.bewebtiengtrung.module.userword.dto.UserWordResponse;
 import com.example.bewebtiengtrung.module.wordimport.dto.ImportAction;
+import com.example.bewebtiengtrung.module.wordimport.dto.ImportAiRequest;
+import com.example.bewebtiengtrung.module.wordimport.dto.ImportAiResponse;
 import com.example.bewebtiengtrung.module.wordimport.dto.ImportConfirmRequest;
 import com.example.bewebtiengtrung.module.wordimport.dto.ImportConfirmResponse;
 import com.example.bewebtiengtrung.module.wordimport.dto.ImportConfirmRow;
@@ -26,15 +33,19 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 
 import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -63,6 +74,9 @@ class ImportServiceImplTest {
     @Mock
     private ImportRowExecutor rowExecutor;
 
+    @Mock
+    private AiWordCompleter wordCompleter;
+
     private ImportServiceImpl service;
 
     /** Mục từ điển cho 学习 [xue2 xi2]. */
@@ -75,7 +89,7 @@ class ImportServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new ImportServiceImpl(cedictService, userWordService, lookupRepository, rowExecutor);
+        service = new ImportServiceImpl(cedictService, userWordService, lookupRepository, rowExecutor, wordCompleter);
         // Mặc định: từ điển trống, hệ thống trống, người dùng chưa học gì
         when(cedictService.lookupSimplified(anyString())).thenReturn(List.of());
         when(cedictService.reverseLookup(anyString(), anyInt())).thenReturn(List.of());
@@ -160,6 +174,68 @@ class ImportServiceImplTest {
             assertThat(r.suggestedAction()).isEqualTo(ImportAction.SKIP);
             assertThat(r.messages()).contains("Thiếu cả chữ Hán lẫn pinyin");
             assertThat(res.summary().errors()).isEqualTo(1);
+        }
+    }
+
+    @Nested
+    @DisplayName("AI điền từ rồi preview")
+    class CompleteWithAi {
+
+        @BeforeEach
+        void aiOn() {
+            when(wordCompleter.isEnabled()).thenReturn(true);
+            when(wordCompleter.model()).thenReturn("gemini-2.5-flash");
+            UserWordResponse learned = new UserWordResponse(1L, 10L, "你好", "你好", "nǐ hǎo", "xin chào", null,
+                    1, null, UserWordStatus.LEARNED, null, java.time.Instant.EPOCH);
+            when(userWordService.list(eq(USER_ID), isNull(), isNull(), isNull(), any(Pageable.class)))
+                    .thenReturn(new PageResponse<>(List.of(learned), 0, 1, 1, 1, true, true));
+        }
+
+        @Test
+        @DisplayName("Từ AI trả về đi qua đúng bước duyệt: tra từ điển, gán cấp, kèm tên model và từ đã học gửi cho AI")
+        void tu_ai_di_qua_preview() {
+            when(cedictService.lookupSimplified("学习")).thenReturn(List.of(XUEXI));
+            when(wordCompleter.completeWords(eq("học\nxin chào"), eq(2), eq(List.of("你好")), eq(ImportServiceImpl.MAX_AI_WORDS)))
+                    .thenReturn(List.of(
+                            new CompletedWord("学习", "xué xí", "học", "to study"),
+                            new CompletedWord("你好", "nǐ hǎo", "xin chào", "hello"),
+                            new CompletedWord("   ", "", "", "")));   // dòng rỗng bị bỏ
+
+            ImportAiResponse res = service.completeWithAi(USER_ID, new ImportAiRequest("học\nxin chào", 2));
+
+            assertThat(res.model()).isEqualTo("gemini-2.5-flash");
+            assertThat(res.aiWords()).isEqualTo(3);
+            assertThat(res.preview().rows()).hasSize(2);
+            ImportPreviewRow first = res.preview().rows().get(0);
+            assertThat(first.simplified()).isEqualTo("学习");
+            assertThat(first.status()).isEqualTo(ImportRowStatus.OK);
+            assertThat(first.suggestedAction()).isEqualTo(ImportAction.CREATE);
+            assertThat(first.pinyinMatchesDictionary()).isTrue();
+            assertThat(first.meaningEn()).isEqualTo("to study");
+            assertThat(first.hskLevel()).isEqualTo(2);
+            // 你好 không có trong từ điển giả ⇒ WARNING nhưng vẫn tạo được, y như người học tự gõ
+            assertThat(res.preview().rows().get(1).status()).isEqualTo(ImportRowStatus.WARNING);
+        }
+
+        @Test
+        @DisplayName("AI tắt ⇒ 503 AI_DISABLED, không gọi AI")
+        void ai_tat_thi_503() {
+            when(wordCompleter.isEnabled()).thenReturn(false);
+
+            assertThatThrownBy(() -> service.completeWithAi(USER_ID, new ImportAiRequest("học", 1)))
+                    .isInstanceOf(ApiException.class)
+                    .satisfies(e -> assertThat(((ApiException) e).getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+            verify(wordCompleter, never()).completeWords(anyString(), anyInt(), any(), anyInt());
+        }
+
+        @Test
+        @DisplayName("AI không trả về từ nào ⇒ 502 AI_EMPTY")
+        void ai_khong_tra_tu_nao() {
+            when(wordCompleter.completeWords(anyString(), anyInt(), any(), anyInt())).thenReturn(List.of());
+
+            assertThatThrownBy(() -> service.completeWithAi(USER_ID, new ImportAiRequest("???", null)))
+                    .isInstanceOf(ApiException.class)
+                    .satisfies(e -> assertThat(((ApiException) e).getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY));
         }
     }
 

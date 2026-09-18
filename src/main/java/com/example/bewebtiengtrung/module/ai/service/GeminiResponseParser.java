@@ -1,8 +1,10 @@
 package com.example.bewebtiengtrung.module.ai.service;
 
 import com.example.bewebtiengtrung.common.exception.ApiException;
+import com.example.bewebtiengtrung.module.ai.dto.CompletedWord;
 import com.example.bewebtiengtrung.module.ai.dto.GeneratedSentence;
 import com.example.bewebtiengtrung.module.ai.dto.SentenceBatch;
+import com.example.bewebtiengtrung.module.ai.dto.WordBatch;
 import org.springframework.http.HttpStatus;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -11,7 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Đọc câu trả lời của Gemini {@code generateContent} thành {@link SentenceBatch}.
+ * Đọc câu trả lời của Gemini {@code generateContent} thành {@link SentenceBatch} hoặc {@link WordBatch}.
  *
  * <p>Tách riêng thành lớp thuần (không gọi mạng) để kiểm thử được mọi nhánh: JSON hợp lệ,
  * không có {@code candidates}, bị chặn bởi {@code promptFeedback.blockReason}, text không phải JSON.
@@ -29,6 +31,53 @@ public final class GeminiResponseParser {
      * @throws ApiException 502 khi câu trả lời không dùng được (bị chặn, thiếu text, JSON hỏng)
      */
     public static SentenceBatch parse(String body, ObjectMapper mapper) {
+        JsonNode arr = payload(body, mapper).path("sentences");
+        if (!arr.isArray()) {
+            throw upstream("AI trả về JSON thiếu trường sentences");
+        }
+        List<GeneratedSentence> out = new ArrayList<>(arr.size());
+        for (JsonNode n : arr) {
+            String hanzi = n.path("hanzi").asText("").trim();
+            if (hanzi.isEmpty()) {
+                continue;
+            }
+            int level = n.path("level").isInt() ? n.path("level").asInt() : 1;
+            if (level < 1 || level > 3) {
+                level = 1;
+            }
+            out.add(new GeneratedSentence(hanzi, n.path("pinyin").asText("").trim(),
+                    n.path("vi").asText("").trim(), level));
+        }
+        return new SentenceBatch(out);
+    }
+
+    /**
+     * Đọc câu trả lời điền từ. Dòng thiếu chữ Hán bị bỏ qua; các trường khác thiếu thì để rỗng —
+     * tầng import sẽ tra từ điển và báo cho người học sửa.
+     *
+     * @throws ApiException 502 khi câu trả lời không dùng được
+     */
+    public static WordBatch parseWords(String body, ObjectMapper mapper) {
+        JsonNode arr = payload(body, mapper).path("words");
+        if (!arr.isArray()) {
+            throw upstream("AI trả về JSON thiếu trường words");
+        }
+        List<CompletedWord> out = new ArrayList<>(arr.size());
+        for (JsonNode n : arr) {
+            String simplified = n.path("simplified").asText("").trim();
+            if (simplified.isEmpty()) {
+                continue;
+            }
+            out.add(new CompletedWord(simplified,
+                    n.path("pinyin").asText("").trim(),
+                    n.path("meaningVi").asText("").trim(),
+                    n.path("meaningEn").asText("").trim()));
+        }
+        return new WordBatch(out);
+    }
+
+    /** Bóc phần JSON mà model sinh ra khỏi phong bì {@code candidates[0].content.parts[*].text}. */
+    private static JsonNode payload(String body, ObjectMapper mapper) {
         if (body == null || body.isBlank()) {
             throw upstream("AI trả về nội dung rỗng");
         }
@@ -65,30 +114,11 @@ public final class GeminiResponseParser {
             throw upstream("AI không trả về nội dung văn bản");
         }
 
-        JsonNode payload;
         try {
-            payload = mapper.readTree(stripFences(text.toString()));
+            return mapper.readTree(stripFences(text.toString()));
         } catch (RuntimeException e) {
             throw upstream("AI trả về câu không đúng định dạng JSON");
         }
-        JsonNode arr = payload.path("sentences");
-        if (!arr.isArray()) {
-            throw upstream("AI trả về JSON thiếu trường sentences");
-        }
-        List<GeneratedSentence> out = new ArrayList<>(arr.size());
-        for (JsonNode n : arr) {
-            String hanzi = n.path("hanzi").asText("").trim();
-            if (hanzi.isEmpty()) {
-                continue;
-            }
-            int level = n.path("level").isInt() ? n.path("level").asInt() : 1;
-            if (level < 1 || level > 3) {
-                level = 1;
-            }
-            out.add(new GeneratedSentence(hanzi, n.path("pinyin").asText("").trim(),
-                    n.path("vi").asText("").trim(), level));
-        }
-        return new SentenceBatch(out);
     }
 
     /** Một số model bọc JSON trong ```json ... ``` dù đã yêu cầu JSON thuần. */

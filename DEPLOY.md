@@ -89,7 +89,7 @@ Repo: <https://github.com/maillexuanduc05122004/hoctiengtrung> (đã có `vercel
 4. **Deploy** (2–3 phút). Ghi lại URL: `https://hoctiengtrung-xxxx.vercel.app`.
 
 **Kiểm tra:** mở URL Vercel → trang chủ, Buổi học, Lật thẻ… hoạt động (phần này offline, không cần BE).
-Vào **Câu của tôi** → thấy form đăng nhập là đúng (chưa nối CORS nên đăng nhập sẽ lỗi — sang Bước 4).
+Vào **Câu của tôi** → báo "Không lấy được từ và câu của bạn" là đúng (chưa nối CORS — sang Bước 4).
 
 ---
 
@@ -104,8 +104,9 @@ Vào **Câu của tôi** → thấy form đăng nhập là đúng (chưa nối C
    (URL Vercel thật của bạn, không có `/` cuối; nếu gắn domain riêng thì thêm vào, cách nhau dấu phẩy.)
 2. **Save Changes** → Render tự khởi động lại (~1 phút).
 
-**Kiểm tra:** trang Vercel → **Câu của tôi** → trang tự vào bằng tài khoản khách `1111`; bấm **Dùng tài khoản của tôi (2222)**
-→ thấy **89 từ đã học** và **90 câu**. Bấm nút tìm kiếm cạnh ⚙ (hoặc Ctrl/⌘+K), gõ `school` → thấy 学校.
+**Kiểm tra:** trang Vercel → **Câu của tôi** → không cần đăng nhập, thấy ngay **89 từ đã học** và **90 câu**
+(máy chủ tự dùng tài khoản `2222` cho request không mang token — biến `DEFAULT_ACCOUNT`). Lần mở sau hiện
+tức thì nhờ bản chụp trong máy, kèm "Đang cập nhật từ máy chủ…" tới khi Render thức dậy.
 
 ---
 
@@ -113,11 +114,12 @@ Vào **Câu của tôi** → thấy form đăng nhập là đúng (chưa nối C
 
 1. <https://aistudio.google.com/apikey> → đăng nhập Google → **Create API key** → copy.
 2. Render → **Environment** → thêm `GEMINI_API_KEY` = key vừa copy → **Save Changes**.
-3. Chờ khởi động lại, mở `https://<url-render>/api/v1/ai/status` (cần token, dùng Swagger) →
+3. Chờ khởi động lại, mở `https://<url-render>/api/v1/ai/status` ngay trên trình duyệt (không cần token) →
    `{"enabled":true,"provider":"gemini","model":"gemini-2.5-flash"}`.
 
 **Kiểm tra:** Vercel → Câu của tôi → **Nghe câu** → **Tạo câu mới bằng AI** → sau 10–20 giây có câu mới,
-gắn nhãn *AI*. Thông báo cho biết bao nhiêu câu bị loại vì dùng chữ chưa học — đó là bộ lọc đang bảo vệ bạn.
+gắn nhãn *AI*, ghép từ vốn từ đã học và ưu tiên 10 từ mới nhất. Thông báo cho biết bao nhiêu câu bị loại vì
+dùng chữ chưa học, trùng, hay chỉ là câu cũ đổi chỗ — đó là bộ lọc đang bảo vệ bạn.
 
 ---
 
@@ -125,7 +127,9 @@ gắn nhãn *AI*. Thông báo cho biết bao nhiêu câu bị loại vì dùng c
 
 Câu của tôi → **Thêm từ & câu** → dán mỗi dòng một từ (`学习 xuéxí học`, hoặc chỉ `xuéxí học` nếu chưa
 nhớ chữ) → **Kiểm tra** → xem bảng đối chiếu từ điển (chữ Hán, pinyin có khớp, nghĩa Anh tự điền) →
-**Thêm N từ**. Từ mới vào sổ đã học ngay; bấm **Tạo câu mới bằng AI** để có câu dùng từ vừa học.
+**Thêm N từ**. Có AI thì gõ đại cũng được — chỉ tiếng Việt (`học`, `bạn bè`), pinyin không dấu, hay
+`gợi ý 10 từ về đồ ăn` — rồi bấm **Điền bằng AI**: AI điền đủ bốn phần, vẫn ra bảng duyệt ấy. Từ mới vào
+sổ đã học ngay; bấm **Tạo câu mới bằng AI** để có câu ghép từ vừa học với vốn từ cũ.
 
 ---
 

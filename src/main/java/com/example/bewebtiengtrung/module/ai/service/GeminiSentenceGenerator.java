@@ -2,9 +2,11 @@ package com.example.bewebtiengtrung.module.ai.service;
 
 import com.example.bewebtiengtrung.common.exception.ApiException;
 import com.example.bewebtiengtrung.module.ai.config.AiProperties;
+import com.example.bewebtiengtrung.module.ai.dto.CompletedWord;
 import com.example.bewebtiengtrung.module.ai.dto.GeneratedSentence;
 import com.example.bewebtiengtrung.module.ai.dto.LearnedWordBrief;
 import com.example.bewebtiengtrung.module.ai.dto.SentenceBatch;
+import com.example.bewebtiengtrung.module.ai.dto.WordBatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -19,24 +21,24 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Sinh câu bằng Google Gemini qua REST API {@code generateContent}.
+ * Sinh câu và điền từ bằng Google Gemini qua REST API {@code generateContent}.
  *
  * <p>Lý do có provider này: Google AI Studio cấp API key <b>miễn phí</b> (không cần thẻ), phù hợp
- * cho một người dùng tự học. Prompt dùng chung với Claude ({@link ClaudeSentenceGenerator#SYSTEM_PROMPT}
- * và {@link ClaudeSentenceGenerator#buildUserPrompt}) để chất lượng hai bên nhất quán; kết quả cũng
- * đi qua cùng bộ lọc "chỉ dùng chữ đã học" ở tầng service.
+ * cho một người dùng tự học. Prompt dùng chung với Claude ({@link ClaudeSentenceGenerator#SYSTEM_PROMPT},
+ * {@link ClaudeSentenceGenerator#WORD_SYSTEM_PROMPT} và các hàm dựng prompt người dùng) để chất lượng
+ * hai bên nhất quán; kết quả cũng đi qua cùng bộ lọc ở tầng service.
  *
  * <p>Yêu cầu JSON có lược đồ ({@code responseMimeType} + {@code responseSchema}) để không phải bóc
  * tách văn bản tự do. Không bao giờ log API key.
  */
 @Service
-public class GeminiSentenceGenerator implements AiSentenceGenerator {
+public class GeminiSentenceGenerator implements AiSentenceGenerator, AiWordCompleter {
 
     private static final Logger log = LoggerFactory.getLogger(GeminiSentenceGenerator.class);
     private static final String BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 
-    /** Lược đồ JSON bắt buộc cho câu trả lời — khớp {@link SentenceBatch}. */
-    private static final Map<String, Object> RESPONSE_SCHEMA = Map.of(
+    /** Lược đồ JSON bắt buộc cho câu trả lời sinh câu — khớp {@link SentenceBatch}. */
+    private static final Map<String, Object> SENTENCE_SCHEMA = Map.of(
             "type", "OBJECT",
             "properties", Map.of(
                     "sentences", Map.of(
@@ -50,6 +52,22 @@ public class GeminiSentenceGenerator implements AiSentenceGenerator {
                                             "level", Map.of("type", "INTEGER")),
                                     "required", List.of("hanzi", "pinyin", "vi", "level")))),
             "required", List.of("sentences"));
+
+    /** Lược đồ JSON bắt buộc cho câu trả lời điền từ — khớp {@link WordBatch}. */
+    private static final Map<String, Object> WORD_SCHEMA = Map.of(
+            "type", "OBJECT",
+            "properties", Map.of(
+                    "words", Map.of(
+                            "type", "ARRAY",
+                            "items", Map.of(
+                                    "type", "OBJECT",
+                                    "properties", Map.of(
+                                            "simplified", Map.of("type", "STRING"),
+                                            "pinyin", Map.of("type", "STRING"),
+                                            "meaningVi", Map.of("type", "STRING"),
+                                            "meaningEn", Map.of("type", "STRING")),
+                                    "required", List.of("simplified", "pinyin", "meaningVi", "meaningEn")))),
+            "required", List.of("words"));
 
     private final AiProperties props;
     private final ObjectMapper mapper;
@@ -74,26 +92,48 @@ public class GeminiSentenceGenerator implements AiSentenceGenerator {
     public List<GeneratedSentence> generate(List<LearnedWordBrief> words, List<String> avoidHanzi,
                                             int count, Integer level, List<String> focusWords) {
         if (!isEnabled()) {
-            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI_DISABLED",
-                    "Chưa cấu hình GEMINI_API_KEY trên máy chủ");
+            throw disabled();
         }
-        int ask = count + count / 3;
+        int ask = ClaudeSentenceGenerator.askCount(count);
         String userPrompt = ClaudeSentenceGenerator.buildUserPrompt(words, avoidHanzi, ask, level, focusWords);
 
+        log.info("Gọi Gemini {}: xin {} câu (cần {}), {} từ đã học, {} từ ưu tiên, tránh {} câu đã có",
+                props.getGeminiModel(), ask, count, words.size(),
+                focusWords == null ? 0 : focusWords.size(), avoidHanzi == null ? 0 : avoidHanzi.size());
+        // Nhiệt độ cao hơn mặc định để các câu trong cùng đợt khác nhau về cấu trúc.
+        String raw = call(ClaudeSentenceGenerator.SYSTEM_PROMPT, userPrompt, SENTENCE_SCHEMA, 0.9);
+        SentenceBatch batch = GeminiResponseParser.parse(raw, mapper);
+        log.info("Gemini trả về {} câu thô", batch.sentences().size());
+        return batch.sentences();
+    }
+
+    @Override
+    public List<CompletedWord> completeWords(String text, int hskLevel, List<String> learnedHanzi, int maxWords) {
+        if (!isEnabled()) {
+            throw disabled();
+        }
+        String userPrompt = ClaudeSentenceGenerator.buildWordPrompt(text, hskLevel, learnedHanzi, maxWords);
+        log.info("Gọi Gemini {} điền từ: {} ký tự, cấp HSK {}, tối đa {} từ",
+                props.getGeminiModel(), text == null ? 0 : text.length(), hskLevel, maxWords);
+        // Điền từ là việc tra cứu, cần chính xác chứ không cần sáng tạo.
+        String raw = call(ClaudeSentenceGenerator.WORD_SYSTEM_PROMPT, userPrompt, WORD_SCHEMA, 0.2);
+        WordBatch batch = GeminiResponseParser.parseWords(raw, mapper);
+        log.info("Gemini trả về {} từ", batch.words().size());
+        return batch.words();
+    }
+
+    /** Gọi {@code generateContent} với system prompt, prompt người dùng và lược đồ JSON bắt buộc. */
+    private String call(String systemPrompt, String userPrompt, Map<String, Object> schema, double temperature) {
         Map<String, Object> body = Map.of(
-                "systemInstruction", Map.of("parts", List.of(Map.of("text", ClaudeSentenceGenerator.SYSTEM_PROMPT))),
+                "systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))),
                 "contents", List.of(Map.of("role", "user", "parts", List.of(Map.of("text", userPrompt)))),
                 "generationConfig", Map.of(
                         "responseMimeType", "application/json",
-                        "responseSchema", RESPONSE_SCHEMA,
-                        "temperature", 0.9,
+                        "responseSchema", schema,
+                        "temperature", temperature,
                         "maxOutputTokens", 8192));
-
-        log.info("Gọi Gemini {}: xin {} câu (cần {}), {} từ đã học, tránh {} câu đã có",
-                props.getGeminiModel(), ask, count, words.size(), avoidHanzi == null ? 0 : avoidHanzi.size());
-        String raw;
         try {
-            raw = client().post()
+            return client().post()
                     .uri("/models/{model}:generateContent", props.getGeminiModel())
                     .header("x-goog-api-key", props.resolvedGeminiKey())
                     .contentType(MediaType.APPLICATION_JSON)
@@ -106,9 +146,11 @@ public class GeminiSentenceGenerator implements AiSentenceGenerator {
             throw new ApiException(HttpStatus.GATEWAY_TIMEOUT, "AI_TIMEOUT",
                     "Không kết nối được tới Gemini hoặc quá thời gian chờ");
         }
-        SentenceBatch batch = GeminiResponseParser.parse(raw, mapper);
-        log.info("Gemini trả về {} câu thô", batch.sentences().size());
-        return batch.sentences();
+    }
+
+    private static ApiException disabled() {
+        return new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI_DISABLED",
+                "Chưa cấu hình GEMINI_API_KEY trên máy chủ");
     }
 
     /** Ánh xạ mã HTTP của Google thành lỗi có ý nghĩa cho người dùng; không lộ body chứa key. */

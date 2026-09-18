@@ -86,9 +86,16 @@ File này gồm cả `CREATE DATABASE`, toàn bộ schema, dữ liệu và bản
 | `1111` | `1111` | user | **khách** cho người khác; cũng có sẵn 89 từ + 90 câu để dùng ngay |
 | `demo@hoctiengtrung.vn` | `Demo@123` | user | tài khoản thử cũ |
 
-Đăng nhập chấp nhận cả email lẫn tên đăng nhập (V17). FE "Mỗi Ngày 中文" tự vào phần *Câu của tôi* bằng
-tài khoản khách 1111 và hiện sẵn cả hai tài khoản dưới form đăng nhập. Đây là site cá nhân, chủ site chọn
-mật khẩu đơn giản có chủ đích; muốn đổi thì đặt biến `ADMIN_PASSWORD` (mục 14.1).
+Đăng nhập chấp nhận cả email lẫn tên đăng nhập (V17). Đây là site cá nhân, chủ site chọn mật khẩu đơn giản
+có chủ đích; muốn đổi thì đặt biến `ADMIN_PASSWORD` (mục 14.1).
+
+**Phần "Câu của tôi" không cần đăng nhập.** Request KHÔNG mang token tới `/me/words/**`, `/me/sentences/**`,
+`/ai/**` và `/dictionary/**` được `security/DefaultAccountFilter` chạy dưới tài khoản `DEFAULT_ACCOUNT`
+(mặc định `2222`), y như người đó vừa đăng nhập; request có token hợp lệ vẫn dùng đúng tài khoản trong token.
+Tài khoản mặc định được cache 60 giây để không tốn truy vấn mỗi request. Lý do: FE trước đây tự đăng nhập
+bằng khách `1111` — thêm một vòng mạng trước khi thấy gì, và khách lại không có quyền nhập từ (403).
+Đặt `DEFAULT_ACCOUNT_ENABLED=false` nếu sau này site có nhiều người dùng thật. Các nhánh khác
+(`/admin/**`, `/me/srs/**`, `/me/attempts/**`…) giữ nguyên quy tắc cũ.
 
 ---
 
@@ -194,6 +201,23 @@ Tất cả dưới tiền tố `/api/v1`. File [api.http](api.http) chứa sẵn
 | GET | `/me/srs/due?deckId=&limit=` | user |
 | POST | `/me/srs/review` | user |
 | GET | `/me/srs/stats` | user |
+
+### Câu của tôi — `/me/words`, `/me/words/import`, `/me/sentences`, `/ai` (không cần token, xem mục 3)
+| Method | Path | Ghi chú |
+|---|---|---|
+| GET | `/me/words` | sổ từ đã học (phân trang, lọc `status`/`hskLevel`/`q`) |
+| PUT / DELETE | `/me/words/{wordId}` | thêm hoặc bỏ một từ khỏi sổ |
+| POST | `/me/words/import/preview` | dán thô → tra CC-CEDICT, đối chiếu kho từ, gợi ý chữ Hán; không ghi gì |
+| POST | `/me/words/import/ai` | `{text, defaultHskLevel}` — AI điền chữ Hán / pinyin / nghĩa cho nội dung tuỳ tiện (chỉ tiếng Việt, chỉ pinyin, "gợi ý 10 từ về…") rồi trả về đúng bảng preview; 503 `AI_DISABLED` khi chưa có khoá |
+| POST | `/me/words/import/confirm` | ghi các dòng đã duyệt, đánh dấu đã học |
+| GET | `/me/sentences` | mọi câu, xếp theo cấp |
+| POST | `/me/sentences/bulk` | thêm câu tự dán (`MANUAL`) |
+| POST | `/me/sentences/generate` | `{count, level?, focusWords?}` — AI ghép từ đã học thành câu MỚI; máy chủ loại câu dùng chữ lạ, câu trùng (`hanzi_key`) và câu chỉ là câu đã có đổi chỗ chữ (`SentenceText.bagKey`, đếm ở `reordered`); `focusWords` là nhóm từ mới mà mỗi câu phải chứa ít nhất một từ |
+| DELETE | `/me/sentences/{id}`, `/me/sentences?source=` | xoá một câu / mọi câu `MANUAL` hoặc `AI` |
+| GET | `/ai/status` | `{enabled, provider, model, reason}` |
+
+Trước đây nhập từ nằm ở `/admin/words/import/**` (đòi `ROLE_ADMIN`); đã chuyển về `/me/words/import/**`
+vì đó là việc thêm từ vào sổ của chính mình.
 
 ### Quản trị — `/admin/**` (bắt buộc `ROLE_ADMIN`)
 CRUD cho `words`, `words/{id}/examples`, `topics`, `courses`, `lessons`,
@@ -356,7 +380,9 @@ Repo đã có sẵn `Dockerfile` (multi-stage, JRE Alpine, không chạy root), 
 | `ADMIN_PASSWORD` | ✔ (production) | mật khẩu mới cho `admin@hoctiengtrung.vn` (≥ 8 ký tự). Lúc khởi động app tự đổi mật khẩu admin theo biến này và thu hồi token cũ; **không đặt** thì admin vẫn dùng `Admin@123` công khai trong README và app ghi cảnh báo |
 | `DEMO_ACCOUNT_ENABLED` | | `false` ⇒ khoá tài khoản `demo@hoctiengtrung.vn` (nên đặt trên production) |
 | `CORS_ALLOWED_ORIGINS` | ✔ | domain FE, cách nhau bằng dấu phẩy, ví dụ `https://ten-app.vercel.app,http://localhost:5173` |
-| `GEMINI_API_KEY` | | **khoá miễn phí** từ Google AI Studio cho tính năng "Tạo câu mới bằng AI" (xem 14.7). Bỏ trống và không có `ANTHROPIC_API_KEY` ⇒ `GET /api/v1/ai/status` trả `enabled=false`, `POST /me/sentences/generate` trả 503 `AI_DISABLED`; phần còn lại của API vẫn chạy bình thường |
+| `DEFAULT_ACCOUNT` | | tài khoản chạy request ẩn danh của phần "Câu của tôi" (mặc định `2222`, xem mục 3) |
+| `DEFAULT_ACCOUNT_ENABLED` | | `false` ⇒ phần "Câu của tôi" bắt đăng nhập trở lại (mặc định `true`) |
+| `GEMINI_API_KEY` | | **khoá miễn phí** từ Google AI Studio cho "Tạo câu mới bằng AI" và "Điền bằng AI" ở phần thêm từ (xem 14.7). Bỏ trống và không có `ANTHROPIC_API_KEY` ⇒ `GET /api/v1/ai/status` trả `enabled=false`, `POST /me/sentences/generate` trả 503 `AI_DISABLED`; phần còn lại của API vẫn chạy bình thường |
 | `ANTHROPIC_API_KEY` | | khoá Claude (trả phí) — nếu có thì được ưu tiên hơn Gemini khi `AI_PROVIDER=auto` |
 | `AI_PROVIDER` | | `auto` (mặc định) · `claude` · `gemini` · `off` |
 | `AI_MODEL` / `GEMINI_MODEL` / `AI_EFFORT` | | mặc định `claude-opus-5` / `gemini-2.5-flash` / `medium` |

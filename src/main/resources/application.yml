@@ -7,6 +7,8 @@
 #   PORT                      : cong HTTP (Render tu cap bien nay)
 #   JWT_SECRET                : khoa ky JWT (bat buoc >= 32 byte o moi truong that)
 #   CORS_ALLOWED_ORIGINS      : danh sach origin FE, cach nhau bang dau phay
+#   DEFAULT_ACCOUNT           : tai khoan chay request an danh cua phan "Cau cua toi" (mac dinh 2222)
+#   DEFAULT_ACCOUNT_ENABLED   : false de bat dang nhap tro lai (mac dinh true)
 #   ANTHROPIC_API_KEY         : khoa goi Claude (module ai tu doc bien nay, KHONG dat o day)
 #   AI_MODEL / AI_EFFORT      : model + muc effort cho tinh nang sinh cau
 # =====================================================================
@@ -42,6 +44,12 @@ app:
     issuer: bewebtiengtrung
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://localhost:4200}
+  default-account:
+    # Phan "Cau cua toi" khong bat dang nhap: request AN DANH toi /api/v1/me/words/**, /api/v1/me/sentences/**,
+    # /api/v1/ai/** va /api/v1/dictionary/** duoc chay duoi tai khoan nay (site ca nhan, mot nguoi dung).
+    # Gui kem Bearer token thi van dung tai khoan trong token. Dat DEFAULT_ACCOUNT_ENABLED=false de bat dang nhap lai.
+    enabled: ${DEFAULT_ACCOUNT_ENABLED:true}
+    username: ${DEFAULT_ACCOUNT:2222}
   ai:
     # API key doc truc tiep tu bien moi truong ANTHROPIC_API_KEY / GEMINI_API_KEY trong module ai — khong dat o day.
     # provider: auto = Claude neu co ANTHROPIC_API_KEY, khong thi Gemini neu co GEMINI_API_KEY (mien phi), khong thi tat.

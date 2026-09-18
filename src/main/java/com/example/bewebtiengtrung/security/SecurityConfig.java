@@ -28,6 +28,9 @@ import org.springframework.web.cors.CorsConfigurationSource;
  *   <li>Các API đọc nội dung học tập (topics, words, courses, lessons, quizzes) mở công khai
  *       với phương thức GET; mọi thao tác ghi đều yêu cầu đăng nhập;</li>
  *   <li>Nhánh {@code /api/v1/admin/**} chỉ dành cho {@code ROLE_ADMIN};</li>
+ *   <li>Phần "Câu của tôi" ({@code /api/v1/me/words/**}, {@code /api/v1/me/sentences/**}, {@code /api/v1/ai/**},
+ *       {@code /api/v1/dictionary/**}) không bắt đăng nhập: request không mang token được
+ *       {@link DefaultAccountFilter} chạy dưới tài khoản mặc định (site cá nhân một người dùng);</li>
  *   <li>Bật {@code @EnableMethodSecurity} để các module dùng được {@code @PreAuthorize}.</li>
  * </ul>
  */
@@ -84,6 +87,7 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
                                                    JwtAuthenticationFilter jwtAuthenticationFilter,
+                                                   DefaultAccountFilter defaultAccountFilter,
                                                    RestAuthenticationEntryPoint authenticationEntryPoint,
                                                    RestAccessDeniedHandler accessDeniedHandler,
                                                    CorsConfigurationSource corsConfigurationSource) throws Exception {
@@ -105,7 +109,9 @@ public class SecurityConfig {
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint(authenticationEntryPoint)
                         .accessDeniedHandler(accessDeniedHandler))
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                // Sau bộ lọc JWT: chỉ điền tài khoản mặc định khi token vắng mặt hoặc không hợp lệ.
+                .addFilterAfter(defaultAccountFilter, JwtAuthenticationFilter.class);
 
         return http.build();
     }

@@ -1,5 +1,7 @@
 package com.example.bewebtiengtrung.module.wordimport.service;
 
+import com.example.bewebtiengtrung.module.wordimport.dto.ImportAiRequest;
+import com.example.bewebtiengtrung.module.wordimport.dto.ImportAiResponse;
 import com.example.bewebtiengtrung.module.wordimport.dto.ImportConfirmRequest;
 import com.example.bewebtiengtrung.module.wordimport.dto.ImportConfirmResponse;
 import com.example.bewebtiengtrung.module.wordimport.dto.ImportPreviewRequest;
@@ -17,6 +19,14 @@ public interface ImportService {
      * @param userId người dùng hiện tại (để tính cờ {@code alreadyLearned})
      */
     ImportPreviewResponse preview(Long userId, ImportPreviewRequest request);
+
+    /**
+     * Nhờ AI điền đủ chữ Hán / pinyin / nghĩa cho nội dung thô (chỉ tiếng Việt, chỉ pinyin, hay một câu
+     * "gợi ý 10 từ về…"), rồi duyệt trước đúng như {@link #preview}. Không ghi gì vào DB.
+     *
+     * @throws com.example.bewebtiengtrung.common.exception.ApiException 503 khi AI chưa cấu hình
+     */
+    ImportAiResponse completeWithAi(Long userId, ImportAiRequest request);
 
     /**
      * Thực thi các dòng đã duyệt. Mỗi dòng chạy trong transaction riêng; dòng lỗi được ghi vào

@@ -64,6 +64,31 @@ class SentenceTextTest {
     }
 
     @Nested
+    @DisplayName("bagKey — khoá túi chữ (chống đổi chỗ)")
+    class BagKey {
+
+        @Test
+        @DisplayName("Hai câu cùng bộ chữ chỉ đổi chỗ cho cùng một khoá")
+        void doi_cho_cung_khoa() {
+            assertThat(SentenceText.bagKey("我今天去学校。")).isEqualTo(SentenceText.bagKey("今天我去学校！"));
+        }
+
+        @Test
+        @DisplayName("Khác một chữ thì khác khoá; câu không có chữ Hán ⇒ rỗng")
+        void khac_chu_khac_khoa() {
+            assertThat(SentenceText.bagKey("我今天去学校")).isNotEqualTo(SentenceText.bagKey("我明天去学校"));
+            assertThat(SentenceText.bagKey("hello 123")).isEmpty();
+            assertThat(SentenceText.bagKey(null)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Chữ lặp được giữ đủ số lần (妈妈 khác 妈)")
+        void giu_so_lan_lap() {
+            assertThat(SentenceText.bagKey("妈妈好")).isNotEqualTo(SentenceText.bagKey("妈好"));
+        }
+    }
+
+    @Nested
     @DisplayName("learnedCodePoints — tập chữ đã học")
     class LearnedCodePoints {
 

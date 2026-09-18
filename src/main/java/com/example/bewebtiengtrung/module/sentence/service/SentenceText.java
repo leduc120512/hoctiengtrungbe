@@ -43,6 +43,24 @@ public final class SentenceText {
     }
 
     /**
+     * Khoá "túi chữ" của câu: các chữ Hán của {@link #key} xếp theo thứ tự mã ký tự.
+     *
+     * <p>Hai câu có cùng khoá này là cùng một bộ chữ chỉ đổi chỗ (我今天去学校 / 今天我去学校) — chính là
+     * loại câu người học than phiền: nghe vẫn là câu cũ, không ôn thêm được từ nào. Dùng để loại ứng viên AI
+     * trùng bộ chữ với câu đã có hoặc với ứng viên khác trong cùng đợt.</p>
+     *
+     * @return chuỗi chữ Hán đã sắp xếp; rỗng nếu câu không có chữ Hán
+     */
+    public static String bagKey(String hanzi) {
+        String key = key(hanzi);
+        if (key.isEmpty()) {
+            return "";
+        }
+        int[] sorted = key.codePoints().sorted().toArray();
+        return new String(sorted, 0, sorted.length);
+    }
+
+    /**
      * Tập ký tự CJK xuất hiện trong danh sách từ đã học (mỗi từ tách ra từng chữ).
      *
      * @param learnedWords các từ đã học (ví dụ "学习", "你好"); phần tử null/rỗng bị bỏ qua
