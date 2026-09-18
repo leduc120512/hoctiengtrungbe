@@ -57,7 +57,7 @@ Repo: <https://github.com/leduc120512/hoctiengtrungbe> (đã có `Dockerfile` + 
    | `DB_URL` | chuỗi ở Bước 1 |
    | `DB_USERNAME` | `avnadmin` |
    | `DB_PASSWORD` | mật khẩu Aiven |
-   | `ADMIN_PASSWORD` | **mật khẩu mới** cho tài khoản admin, ≥ 8 ký tự — app tự đổi lúc khởi động |
+   | `ADMIN_PASSWORD` | **bỏ trống / không tạo** nếu muốn giữ tài khoản `2222`/`2222` (V17). Nếu đặt, app đổi mật khẩu của `2222` thành giá trị này lúc khởi động |
    | `CORS_ALLOWED_ORIGINS` | tạm điền `http://localhost:5173` — sẽ sửa ở Bước 4 |
    | `GEMINI_API_KEY` | để trống, thêm ở Bước 5 (hoặc lấy trước tại <https://aistudio.google.com/apikey>) |
    | `JWT_SECRET` | Render tự sinh |
@@ -68,8 +68,7 @@ Repo: <https://github.com/leduc120512/hoctiengtrungbe> (đã có `Dockerfile` + 
 
 **Kiểm tra:** mở `https://<url-render>/actuator/health` → `{"status":"UP"}`;
 mở `https://<url-render>/swagger-ui.html` → thấy danh sách API.
-Đăng nhập thử ngay trong Swagger: `POST /api/v1/auth/login` với `admin@hoctiengtrung.vn` + mật khẩu
-bạn đặt ở `ADMIN_PASSWORD` → nhận `accessToken`.
+Đăng nhập thử ngay trong Swagger: `POST /api/v1/auth/login` với `{"email":"2222","password":"2222"}` → nhận `accessToken`.
 
 > Gói Free của Render **ngủ sau 15 phút không dùng**; lần gọi đầu sau đó chậm 30–60 giây. Bình thường.
 

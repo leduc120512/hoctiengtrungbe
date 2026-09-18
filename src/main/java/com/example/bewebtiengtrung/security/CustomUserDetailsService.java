@@ -37,9 +37,12 @@ public class CustomUserDetailsService implements UserDetailsService {
         if (email == null || email.isBlank()) {
             throw new UsernameNotFoundException("Email đăng nhập không được để trống");
         }
-        User user = userRepository.findByEmailIgnoreCase(email.trim())
+        // Chấp nhận cả email lẫn tên đăng nhập (ví dụ "2222"), để người dùng không phải nhớ email.
+        String login = email.trim();
+        User user = userRepository.findByEmailIgnoreCase(login)
+                .or(() -> userRepository.findByUsernameIgnoreCase(login))
                 .orElseThrow(() -> new UsernameNotFoundException(
-                        "Không tìm thấy người dùng với email: " + email));
+                        "Không tìm thấy người dùng: " + login));
         return CustomUserDetails.from(user);
     }
 

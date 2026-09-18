@@ -144,6 +144,7 @@ public class AuthServiceImpl implements AuthService {
         }
 
         User user = userRepository.findByEmailIgnoreCase(email)
+                .or(() -> userRepository.findByUsernameIgnoreCase(email))
                 .orElseThrow(() -> new UnauthorizedException("Email hoac mat khau khong dung"));
 
         user.setLastLoginAt(Instant.now());

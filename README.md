@@ -80,12 +80,15 @@ File này gồm cả `CREATE DATABASE`, toàn bộ schema, dữ liệu và bản
 
 ## 3. Tài khoản có sẵn
 
-| Email | Mật khẩu | Quyền |
-|---|---|---|
-| `admin@hoctiengtrung.vn` | `Admin@123` | `ROLE_ADMIN` + `ROLE_USER` |
-| `demo@hoctiengtrung.vn` | `Demo@123` | `ROLE_USER` |
+| Tài khoản (email hoặc tên đăng nhập) | Mật khẩu | Quyền | Ghi chú |
+|---|---|---|---|
+| `2222` (= `admin@hoctiengtrung.vn`) | `2222` | admin + user | **tài khoản của chủ site** — giữ 89 từ đã học, 90 câu |
+| `1111` | `1111` | user | **khách** cho người khác; cũng có sẵn 89 từ + 90 câu để dùng ngay |
+| `demo@hoctiengtrung.vn` | `Demo@123` | user | tài khoản thử cũ |
 
-> Đây là mật khẩu demo. **Đổi ngay trước khi deploy.**
+Đăng nhập chấp nhận cả email lẫn tên đăng nhập (V17). FE "Mỗi Ngày 中文" tự vào phần *Câu của tôi* bằng
+tài khoản khách 1111 và hiện sẵn cả hai tài khoản dưới form đăng nhập. Đây là site cá nhân, chủ site chọn
+mật khẩu đơn giản có chủ đích; muốn đổi thì đặt biến `ADMIN_PASSWORD` (mục 14.1).
 
 ---
 

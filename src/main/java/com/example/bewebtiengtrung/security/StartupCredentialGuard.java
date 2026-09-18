@@ -64,8 +64,8 @@ public class StartupCredentialGuard implements ApplicationRunner {
 
     private void guardAdmin(User admin) {
         if (!adminPassword.isEmpty()) {
-            if (adminPassword.length() < 8) {
-                log.error("ADMIN_PASSWORD quá ngắn (< 8 ký tự) — bỏ qua, mật khẩu admin KHÔNG được đổi");
+            if (adminPassword.length() < 4) {
+                log.error("ADMIN_PASSWORD quá ngắn (< 4 ký tự) — bỏ qua, mật khẩu admin KHÔNG được đổi");
                 return;
             }
             if (passwordEncoder.matches(adminPassword, admin.getPasswordHash())) {
