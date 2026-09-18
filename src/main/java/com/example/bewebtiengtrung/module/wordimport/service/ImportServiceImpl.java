@@ -132,9 +132,8 @@ public class ImportServiceImpl implements ImportService {
                 // CC-CEDICT có thể có nhiều mục cùng chữ giản thể + cùng âm (khác nghĩa) — gộp lại
                 // để người dùng không thấy một chữ hiện hai lần trong danh sách gợi ý.
                 java.util.Set<String> seenCandidates = new java.util.LinkedHashSet<>();
-                d.candidates = nullSafe(cedictService.reverseLookup(userPinyinMarked, CANDIDATE_LIMIT * 2)).stream()
+                d.candidates = nullSafe(cedictService.reverseLookup(userPinyinMarked, CANDIDATE_LIMIT)).stream()
                         .filter(e -> seenCandidates.add(e.simplified()))
-                        .limit(CANDIDATE_LIMIT)
                         .map(this::toCandidate)
                         .collect(Collectors.toList());
                 d.pinyin = userPinyinMarked;
