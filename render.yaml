@@ -1,0 +1,40 @@
+# =====================================================================
+# Render Blueprint — deploy backend "Web hoc tieng Trung" bang Docker
+#   Dashboard Render > New > Blueprint > chon repo nay
+# Render KHONG co managed MySQL: DB_URL / DB_USERNAME / DB_PASSWORD phai
+# nhap tay tren dashboard (sync: false) tro toi MySQL ben ngoai
+# (Aiven / TiDB Cloud / Railway...). Xem README muc "Deploy len Render".
+# =====================================================================
+services:
+  - type: web
+    name: hoctiengtrung-api
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: DB_URL
+        sync: false          # nhap tay tren dashboard, vi du: jdbc:mysql://host:port/db?sslMode=REQUIRED&...
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_POOL_SIZE
+        value: "5"
+      - key: JWT_SECRET
+        generateValue: true  # Render tu sinh chuoi ngau nhien du dai
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false          # domain FE tren Vercel, vi du: https://ten-app.vercel.app
+      - key: ANTHROPIC_API_KEY
+        sync: false          # khoa Claude; bo trong thi tinh nang sinh cau AI tu tat
+      - key: AI_MODEL
+        value: claude-opus-5
+      - key: GEMINI_API_KEY        # mien phi: https://aistudio.google.com/apikey
+        sync: false
+      - key: AI_PROVIDER
+        value: auto
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: JAVA_OPTS
+        value: -XX:MaxRAMPercentage=75 -XX:+UseSerialGC

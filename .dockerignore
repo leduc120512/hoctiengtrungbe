@@ -1,0 +1,22 @@
+# Khong dua vao build context (giam kich thuoc, tranh lo file cuc bo)
+target/
+.idea/
+*.iml
+.git/
+.gitignore
+.gitattributes
+scripts/*.sql
+api.http
+HELP.md
+README.md
+.vscode/
+*.log
+.DS_Store
+docker-compose.yml
+docker-compose.override.yml
+render.yaml
+Dockerfile
+.dockerignore
+# File bi mat cua docker compose (JWT_SECRET, ANTHROPIC_API_KEY...) — khong bao gio dua vao image
+.env
+*.env

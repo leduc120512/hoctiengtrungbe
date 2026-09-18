@@ -1,0 +1,61 @@
+# =====================================================================
+# docker compose — chay tron bo (MySQL 8 + API) tren may local
+#   docker compose up --build
+# Lan dau khoi dong, Flyway tu tao schema + seed du lieu vao DB trong,
+# KHONG can import SQL thu cong.
+#
+# Bien moi truong doc tu shell / file .env cung thu muc (neu co):
+#   JWT_SECRET, CORS_ALLOWED_ORIGINS, ANTHROPIC_API_KEY, AI_MODEL
+# =====================================================================
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: hoctiengtrung-mysql
+    # Bat buoc utf8mb4 + collation 0900 de khop voi migration (Han tu, pinyin co dau)
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
+    environment:
+      MYSQL_DATABASE: hoctiengtrung
+      MYSQL_USER: hoctiengtrung
+      MYSQL_PASSWORD: HocTiengTrung@2026
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      # Map ra 3307 de khong dung MySQL dang cai san tren may (3306)
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      # Dung -h 127.0.0.1 (TCP) de khong bi danh lua boi server tam trong luc khoi tao
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  api:
+    build: .
+    container_name: hoctiengtrung-api
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/hoctiengtrung?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false
+      DB_USERNAME: hoctiengtrung
+      DB_PASSWORD: HocTiengTrung@2026
+      DB_POOL_SIZE: "5"
+      PORT: "8080"
+      # >= 32 byte, doi thanh secret that khi deploy
+      JWT_SECRET: ${JWT_SECRET:-doi-chuoi-nay-thanh-secret-that-dai-it-nhat-32-byte-truoc-khi-deploy}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173,http://localhost:4200}
+      # Khoa Claude lay tu moi truong may host; de trong thi tinh nang AI tu tat (503 AI_DISABLED)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AI_PROVIDER: ${AI_PROVIDER:-auto}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      AI_MODEL: ${AI_MODEL:-claude-opus-5}
+      AI_EFFORT: ${AI_EFFORT:-medium}
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  mysql-data:

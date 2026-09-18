@@ -1,16 +1,24 @@
 # =====================================================================
 # Cau hinh ung dung "Web hoc tieng Trung"
 # Khong hard-code bi mat: moi gia tri nhay cam deu doc tu bien moi truong.
+#   DB_URL                    : JDBC URL MySQL (mac dinh localhost:3306/hoctiengtrung)
 #   DB_USERNAME / DB_PASSWORD : tai khoan MySQL
+#   DB_POOL_SIZE              : so connection toi da (host MySQL free thuong gioi han)
+#   PORT                      : cong HTTP (Render tu cap bien nay)
 #   JWT_SECRET                : khoa ky JWT (bat buoc >= 32 byte o moi truong that)
+#   CORS_ALLOWED_ORIGINS      : danh sach origin FE, cach nhau bang dau phay
+#   ANTHROPIC_API_KEY         : khoa goi Claude (module ai tu doc bien nay, KHONG dat o day)
+#   AI_MODEL / AI_EFFORT      : model + muc effort cho tinh nang sinh cau
 # =====================================================================
 spring:
   application.name: bewebtiengtrung
 
   datasource:
-    url: jdbc:mysql://localhost:3306/hoctiengtrung?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false
+    url: ${DB_URL:jdbc:mysql://localhost:3306/hoctiengtrung?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false}
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:5}      # host MySQL free thuong gioi han connection
 
   jpa:
     hibernate.ddl-auto: validate
@@ -23,7 +31,7 @@ spring:
     enabled: true
     baseline-on-migrate: true
 
-# Cau hinh rieng cua ung dung (anh xa vao lop config/AppProperties)
+# Cau hinh rieng cua ung dung (anh xa vao lop config/AppProperties va module/ai/AiProperties)
 app:
   jwt:
     secret: ${JWT_SECRET:change-me-in-production-min-32-bytes-long-secret-key}
@@ -31,8 +39,27 @@ app:
     refresh-token-ttl: 2592000      # giay (30 ngay)
     issuer: bewebtiengtrung
   cors:
-    allowed-origins: http://localhost:3000,http://localhost:5173,http://localhost:4200
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://localhost:4200}
+  ai:
+    # API key doc truc tiep tu bien moi truong ANTHROPIC_API_KEY / GEMINI_API_KEY trong module ai — khong dat o day.
+    # provider: auto = Claude neu co ANTHROPIC_API_KEY, khong thi Gemini neu co GEMINI_API_KEY (mien phi), khong thi tat.
+    provider: ${AI_PROVIDER:auto}
+    model: ${AI_MODEL:claude-opus-5}
+    gemini-model: ${GEMINI_MODEL:gemini-2.5-flash}
+    effort: ${AI_EFFORT:medium}
+    max-tokens: 16000
+    timeout-seconds: 120
 
-server.port: 8080
+server:
+  port: ${PORT:8080}                # Render cap PORT; local mac dinh 8080
+  # Sau reverse proxy cua Render (TLS ket thuc o proxy, app nhan HTTP + X-Forwarded-Proto):
+  # "framework" = ForwardedHeaderFilter -> URL sinh ra (Swagger "Try it out", redirect) dung https.
+  # Local khong co proxy thi header nay khong ton tai, khong anh huong.
+  forward-headers-strategy: framework
+
+# Actuator: chi mo /actuator/health (da nam trong PUBLIC_PATHS cua SecurityConfig)
+management:
+  endpoints.web.exposure.include: health
+  endpoint.health.probes.enabled: true
 
 springdoc.swagger-ui.path: /swagger-ui.html

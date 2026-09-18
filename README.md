@@ -332,3 +332,137 @@ tìm thêm trong `pinyin_numbered` (`'hao3'` — chuỗi ASCII), nên **gõ piny
 
 Ngoài ra toàn bộ API đã được kiểm thử trực tiếp end-to-end: đăng nhập, xoay vòng refresh token,
 phân quyền admin, không rò rỉ đáp án, chấm điểm đúng 10/10, và chuỗi SM-2.
+
+---
+
+## 14. Deploy lên Render (Docker) + chạy local bằng Docker Compose
+
+Repo đã có sẵn `Dockerfile` (multi-stage, JRE Alpine, không chạy root), `docker-compose.yml`
+(MySQL 8 + API) và `render.yaml` (Blueprint). Mọi cấu hình đều đọc từ **biến môi trường**
+— không có bí mật nào nằm trong mã nguồn.
+
+### 14.1 Biến môi trường
+
+| Biến | Bắt buộc | Ý nghĩa |
+|---|---|---|
+| `DB_URL` | ✔ | JDBC URL tới MySQL, ví dụ `jdbc:mysql://host:3306/hoctiengtrung?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC` |
+| `DB_USERNAME` / `DB_PASSWORD` | ✔ | tài khoản MySQL |
+| `DB_POOL_SIZE` | | số connection tối đa của Hikari, mặc định `5` (host MySQL free thường giới hạn 10–20 connection) |
+| `PORT` | | cổng HTTP, mặc định `8080` — **Render tự cấp**, không cần đặt |
+| `JWT_SECRET` | ✔ | khoá ký JWT, **tối thiểu 32 byte** (app fail-fast nếu ngắn hơn) |
+| `CORS_ALLOWED_ORIGINS` | ✔ | domain FE, cách nhau bằng dấu phẩy, ví dụ `https://ten-app.vercel.app,http://localhost:5173` |
+| `GEMINI_API_KEY` | | **khoá miễn phí** từ Google AI Studio cho tính năng "Tạo câu mới bằng AI" (xem 14.7). Bỏ trống và không có `ANTHROPIC_API_KEY` ⇒ `GET /api/v1/ai/status` trả `enabled=false`, `POST /me/sentences/generate` trả 503 `AI_DISABLED`; phần còn lại của API vẫn chạy bình thường |
+| `ANTHROPIC_API_KEY` | | khoá Claude (trả phí) — nếu có thì được ưu tiên hơn Gemini khi `AI_PROVIDER=auto` |
+| `AI_PROVIDER` | | `auto` (mặc định) · `claude` · `gemini` · `off` |
+| `AI_MODEL` / `GEMINI_MODEL` / `AI_EFFORT` | | mặc định `claude-opus-5` / `gemini-2.5-flash` / `medium` |
+| `JAVA_OPTS` | | mặc định `-XX:MaxRAMPercentage=75 -XX:+UseSerialGC` (vừa gói 512 MB của Render) |
+
+Health check: `GET /actuator/health` (công khai, không cần token) — Render dùng đường dẫn này
+để biết app đã sẵn sàng.
+
+### 14.2 Không cần đẩy database thủ công
+
+**Chỉ cần một database MySQL 8 trống** (utf8mb4). Ở lần khởi động đầu tiên Flyway tự chạy toàn bộ
+migration `V1..Vn`: tạo 23+ bảng, seed 300 từ HSK 1–2, khoá học, đề thi, bộ thẻ, tài khoản
+admin/demo… Bạn **không** phải `mysqldump` từ máy local rồi import lên host, cũng không phải chạy
+`scripts/hoctiengtrung_full.sql`. Muốn thêm dữ liệu sau này thì viết migration mới `V16__...sql`
+— khi deploy, Flyway chỉ chạy phần còn thiếu.
+
+> Nếu database trên host **đã có bảng sẵn** (ví dụ bạn lỡ import dump), `baseline-on-migrate: true`
+> sẽ đánh dấu baseline và bỏ qua migration cũ — nên tốt nhất là cho Flyway làm việc trên DB trống.
+
+### 14.3 Chọn nơi đặt MySQL — Render KHÔNG có managed MySQL
+
+Render chỉ cung cấp managed **Postgres**. Với MySQL có 3 lựa chọn:
+
+| Lựa chọn | Ưu / nhược | Khuyên dùng |
+|---|---|---|
+| **1. MySQL bên ngoài** — [Aiven](https://aiven.io) (free tier MySQL 8), [Railway](https://railway.app), [TiDB Cloud Serverless](https://tidbcloud.com) | Có managed backup, không tốn RAM của Render, free tier đủ dùng cho 1 người. Aiven là MySQL 8 thật nên chạy đúng mọi collation của dự án. | ✔ **Khuyên dùng — Aiven** |
+| **2. Private Service trên Render** chạy image `mysql:8.0` + Persistent Disk | Cùng mạng nội bộ, nhanh; nhưng Private Service + Disk **không có ở gói free**, và tự lo backup. | Khi đã trả phí |
+| **3. Đổi sang Postgres của Render** | Managed, free tier có sẵn; nhưng phải viết lại toàn bộ migration (collation `utf8mb4_0900_*`, `DATETIME(6)`, `BIT(1)`…) và đổi driver. | Không, trừ khi muốn bỏ MySQL |
+
+Lưu ý khi dùng **Aiven**: bắt buộc SSL, nên `DB_URL` phải có `sslMode=REQUIRED`. Database mặc định
+là `defaultdb`, user `avnadmin`, cổng do Aiven cấp (không phải 3306):
+
+```
+jdbc:mysql://mysql-xxxx-yyyy.aivencloud.com:12345/defaultdb?sslMode=REQUIRED&useUnicode=true&characterEncoding=utf8&serverTimezone=UTC
+```
+
+Với **Railway**: `jdbc:mysql://<host>.proxy.rlwy.net:<port>/railway?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC`.
+
+Với **TiDB Cloud**: là MySQL-compatible chứ không phải MySQL — cần `sslMode=REQUIRED` và kiểm tra
+trước collation `utf8mb4_0900_as_cs` mà `V13` dùng cho cột `pinyin` (mục 12); nếu TiDB không hỗ trợ,
+migration sẽ dừng ở V13. Ưu tiên Aiven/Railway (MySQL 8 thật).
+
+### 14.4 Các bước deploy lên Render
+
+1. Push repo lên GitHub (remote `origin` đã trỏ tới `leduc120512/hoctiengtrungbe`).
+2. Tạo MySQL ở Aiven (hoặc lựa chọn khác) — lấy host, port, user, password, tên DB.
+3. Render Dashboard → **New → Blueprint** → chọn repo. Render đọc `render.yaml`, tạo web service
+   `hoctiengtrung-api` (Docker, gói free, region Singapore).
+4. Điền các biến `sync: false` trên dashboard: `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`,
+   `CORS_ALLOWED_ORIGINS` (domain Vercel của FE), `ANTHROPIC_API_KEY` (có thể bỏ trống).
+   `JWT_SECRET` được Render tự sinh (`generateValue: true`).
+5. Deploy. Lần build đầu mất vài phút (Maven tải dependency). Xem log tới khi thấy Flyway
+   `Successfully applied N migrations` và `Started BewebtiengtrungApplication`.
+6. Kiểm tra: `https://<ten-service>.onrender.com/actuator/health` → `{"status":"UP"}`,
+   Swagger tại `/swagger-ui.html`, đăng nhập `admin@hoctiengtrung.vn` rồi **đổi mật khẩu ngay**.
+7. Bên FE (Vercel) đặt `VITE_API_URL=https://<ten-service>.onrender.com`.
+
+> **Free tier Render ngủ sau 15 phút không có request.** Lần gọi đầu sau khi ngủ mất ~30–60 s
+> (JVM khởi động + Flyway kiểm tra + nạp từ điển CC-CEDICT). FE nên hiện trạng thái "đang đánh
+> thức máy chủ…" thay vì báo lỗi ngay; hoặc dùng dịch vụ ping định kỳ (UptimeRobot) nếu muốn
+> luôn sẵn sàng.
+
+### 14.5 Chạy local trọn bộ bằng Docker Compose
+
+```bash
+# (tuỳ chọn) đặt khoá AI cho phiên shell hiện tại
+export ANTHROPIC_API_KEY=sk-ant-...        # PowerShell: $env:ANTHROPIC_API_KEY="sk-ant-..."
+
+docker compose up --build
+```
+
+- MySQL 8 chạy trong container, map ra cổng **3307** của máy (để không đụng MySQL cài sẵn ở 3306),
+  user `hoctiengtrung` / `HocTiengTrung@2026`, dữ liệu giữ trong volume `mysql-data`.
+- API chờ MySQL `healthy` rồi mới khởi động, Flyway tự tạo schema + seed → mở
+  <http://localhost:8080/swagger-ui.html>.
+- `ANTHROPIC_API_KEY`, `JWT_SECRET`, `CORS_ALLOWED_ORIGINS`, `AI_MODEL` được truyền từ môi
+  trường máy host (hoặc file `.env` cùng thư mục) vào container; bỏ trống thì dùng giá trị dev mặc định.
+  **Không commit file `.env`** (thêm dòng `.env` vào `.gitignore` — hiện chưa có); `.dockerignore`
+  đã loại `.env` khỏi image nên khoá không bao giờ bị đóng gói vào container.
+- Dừng container (`Ctrl+C` hoặc `docker compose stop`) gửi SIGTERM tới JVM (entrypoint dùng `exec`),
+  Spring tắt êm và đóng pool DB.
+- Xoá sạch để chạy lại từ đầu: `docker compose down -v`.
+
+### 14.6 Build image thủ công
+
+```bash
+docker build -t hoctiengtrung-api .
+docker run --rm -p 8080:8080 \
+  -e DB_URL="jdbc:mysql://host.docker.internal:3306/hoctiengtrung?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false" \
+  -e DB_USERNAME=hoctiengtrung -e DB_PASSWORD='HocTiengTrung@2026' \
+  -e JWT_SECRET='chuoi-bi-mat-that-dai-it-nhat-32-byte' \
+  hoctiengtrung-api
+```
+
+Image build bằng JDK 21 (`--release 17`, Lombok với `<proc>full</proc>` vẫn hợp lệ), chạy bằng
+JRE 21 Alpine dưới user `app` không đặc quyền.
+
+### 14.7 Bật AI miễn phí với Google Gemini
+
+Anthropic không có gói miễn phí, nhưng **Google AI Studio cấp API key miễn phí, không cần thẻ**:
+
+1. Vào <https://aistudio.google.com/apikey>, đăng nhập Google, bấm **Create API key**.
+2. Trên Render: *Environment → Add Environment Variable* → `GEMINI_API_KEY` = khoá vừa tạo → Save
+   (Render tự deploy lại). Local: `$env:GEMINI_API_KEY="..."` trước khi chạy.
+3. Kiểm tra: `GET /api/v1/ai/status` phải trả `{"enabled":true,"provider":"gemini","model":"gemini-2.5-flash"}`.
+
+Cách chọn provider (`AI_PROVIDER`): `auto` dùng Claude nếu có `ANTHROPIC_API_KEY`, không thì Gemini nếu
+có `GEMINI_API_KEY`, không thì tắt. Cả hai provider dùng **cùng một prompt** và kết quả đều đi qua
+cùng bộ lọc "mọi chữ Hán trong câu phải nằm trong vốn từ đã học" ở tầng service.
+
+Lưu ý free tier: giới hạn vài chục yêu cầu/phút và vài trăm/ngày (thay đổi theo thời gian) — đủ cho
+một người tự học; khi hết hạn mức API trả 429 `AI_RATE_LIMIT`, thử lại sau ít phút. Theo điều khoản
+free tier, Google có thể dùng dữ liệu gửi lên để cải thiện sản phẩm — prompt của ứng dụng chỉ chứa
+từ vựng và câu luyện, không có thông tin cá nhân.

@@ -37,6 +37,14 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
+        <!--
+            Actuator: chi mo /actuator/health (xem management.* trong application.yml)
+            de Render / Docker healthcheck biet app da san sang.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
 
         <!--
             Spring Boot 4 tach auto-configuration thanh tung module rieng theo cong nghe.
@@ -81,6 +89,16 @@
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>${springdoc.version}</version>
+        </dependency>
+
+        <!--
+            SDK Java chinh thuc cua Anthropic - module ai goi Claude sinh cau luyen nghe
+            (structured output co kieu, KHONG dung HTTP tho). Xem module/ai/ClaudeSentenceGenerator.
+        -->
+        <dependency>
+            <groupId>com.anthropic</groupId>
+            <artifactId>anthropic-java</artifactId>
+            <version>2.34.0</version>
         </dependency>
 
         <dependency>
