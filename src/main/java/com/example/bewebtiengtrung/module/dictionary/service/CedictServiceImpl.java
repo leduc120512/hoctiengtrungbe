@@ -16,7 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -26,21 +26,28 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 
 /**
- * Nạp CC-CEDICT từ {@code classpath:dictionary/cedict_ts.u8.gz} lúc khởi động và giữ ba chỉ mục:
- * theo chữ giản thể, theo khoá pinyin, và theo từng từ tiếng Anh trong nghĩa.
+ * Nạp CC-CEDICT từ {@code classpath:dictionary/cedict_ts.u8.gz} và giữ trong bộ nhớ ở dạng NÉN.
  *
- * <p>Định dạng mỗi dòng: {@code Traditional Simplified [pin1 yin1] /def 1/def 2/}. Dòng bắt đầu
- * bằng {@code #} là chú thích. Khoảng 125 nghìn mục, nạp trong dưới 2 giây.
+ * <p>Vì máy chủ chỉ có 512 MB RAM, dữ liệu KHÔNG được giữ dưới dạng 125 nghìn object {@link CedictEntry}
+ * với List định nghĩa riêng (≈ 900 nghìn String + List). Thay vào đó:
+ * <ul>
+ *   <li>các mảng song song theo chỉ số mục: giản thể, phồn thể (null khi trùng giản thể), pinyin dạng số,
+ *       và các nghĩa nối bằng {@code '/'} trong MỘT chuỗi;</li>
+ *   <li>chỉ mục là {@code Map<String, int[]>} trỏ tới chỉ số mục;</li>
+ *   <li>{@link CedictEntry} chỉ được dựng cho các mục thực sự trả về (≤ 50 mỗi lần tra).</li>
+ * </ul>
+ * Nạp chạy ở luồng nền để cổng HTTP mở sớm; các phép tra chờ ở {@link #awaitLoaded()}.
  *
- * <p>Nguồn: CC-CEDICT (MDBG), giấy phép CC BY-SA 4.0.
+ * <p>Định dạng mỗi dòng: {@code Traditional Simplified [pin1 yin1] /def 1/def 2/}; dòng {@code #} là chú thích.
+ * Nguồn: CC-CEDICT (MDBG), giấy phép CC BY-SA 4.0.
  */
 @Slf4j
 @Service
@@ -52,31 +59,38 @@ public class CedictServiceImpl implements CedictService {
     private static final Pattern PAREN = Pattern.compile("\\([^)]*\\)");
     private static final Pattern NON_LETTER = Pattern.compile("[^a-z]+");
     private static final Duration SYSTEM_WORDS_TTL = Duration.ofMinutes(10);
+    private static final int[] EMPTY = new int[0];
 
     /** Nghĩa mở đầu bằng các cụm này chỉ là biến thể / họ / cách viết cũ — đẩy xuống cuối khi xếp hạng. */
     private static final String[] LOW_VALUE_PREFIXES = {
             "variant of", "surname", "old variant", "see ", "used in", "(archaic)", "abbr. for"
     };
+    /** Nghĩa chứa các cụm này ở bất kỳ đâu cũng là mục hiếm/rút gọn (ví dụ 圕 = "contraction of 图书馆"). */
+    private static final String[] LOW_VALUE_ANYWHERE = { "contraction of", "contracted form", "variant of", "archaic" };
 
     private final WordRepository wordRepository;
 
-    private Map<String, List<CedictEntry>> bySimplified = Map.of();
-    private TreeMap<String, List<CedictEntry>> bySimplifiedSorted = new TreeMap<>();
-    private Map<String, List<CedictEntry>> byTraditional = Map.of();
-    private Map<String, List<CedictEntry>> byPinyinKey = Map.of();
-    private Map<String, List<CedictEntry>> byEnglishWord = Map.of();
+    // ---- kho nén: chỉ số i = một mục từ điển
+    private String[] simplified = new String[0];
+    private String[] traditional = new String[0];   // null ⇒ trùng giản thể
+    private String[] numbered = new String[0];
+    private String[] defsJoined = new String[0];     // "def1/def2/…"
+
+    private Map<String, int[]> bySimplified = Map.of();
+    private TreeMap<String, int[]> bySimplifiedSorted = new TreeMap<>();
+    private Map<String, int[]> byTraditional = Map.of();
+    private Map<String, int[]> byPinyinKey = Map.of();
+    private Map<String, int[]> byEnglishWord = Map.of();
     private int size;
 
-    /**
-     * Mở khoá khi từ điển đã nạp xong. Nạp chạy ở luồng nền để cổng HTTP mở sớm (trên máy chủ CPU 0.1
-     * việc nạp mất ~30 s); các phép tra chờ ở {@link #awaitLoaded()} nếu được gọi trước lúc đó.
-     */
     private final CountDownLatch loaded = new CountDownLatch(1);
     private volatile RuntimeException loadFailure;
 
     /** Cache tập chữ giản thể có trong bảng words (để xếp hạng), làm mới mỗi 10 phút. */
     private volatile Set<String> systemWords = Set.of();
     private volatile Instant systemWordsLoadedAt = Instant.EPOCH;
+
+    // ------------------------------------------------------------------ nạp
 
     @PostConstruct
     void startLoading() {
@@ -94,7 +108,7 @@ public class CedictServiceImpl implements CedictService {
         t.start();
     }
 
-    /** Chờ từ điển nạp xong (tối đa 3 phút); ném lỗi nếu nạp thất bại. Dùng được trong test đồng bộ. */
+    /** Chờ từ điển nạp xong (tối đa 3 phút); ném lỗi nếu nạp thất bại. */
     void awaitLoaded() {
         try {
             if (!loaded.await(3, TimeUnit.MINUTES)) {
@@ -109,14 +123,17 @@ public class CedictServiceImpl implements CedictService {
         }
     }
 
-    /** Nạp đồng bộ — gọi trực tiếp trong test; ở runtime được {@link #startLoading()} gọi ở luồng nền. */
+    /** Nạp đồng bộ — test gọi trực tiếp; runtime gọi từ luồng nền. */
     void load() {
         long started = System.nanoTime();
-        Map<String, List<CedictEntry>> simp = new HashMap<>(160_000);
-        Map<String, List<CedictEntry>> trad = new HashMap<>(160_000);
-        Map<String, List<CedictEntry>> pin = new HashMap<>(80_000);
-        Map<String, List<CedictEntry>> eng = new HashMap<>(120_000);
-        int count = 0;
+        List<String> simp = new ArrayList<>(130_000);
+        List<String> trad = new ArrayList<>(130_000);
+        List<String> num = new ArrayList<>(130_000);
+        List<String> defs = new ArrayList<>(130_000);
+        Map<String, IntList> mSimp = new HashMap<>(160_000);
+        Map<String, IntList> mTrad = new HashMap<>(160_000);
+        Map<String, IntList> mPin = new HashMap<>(140_000);
+        Map<String, IntList> mEng = new HashMap<>(60_000);
 
         try (GZIPInputStream gz = new GZIPInputStream(new ClassPathResource(RESOURCE).getInputStream());
              BufferedReader reader = new BufferedReader(new InputStreamReader(gz, StandardCharsets.UTF_8), 1 << 16)) {
@@ -129,48 +146,77 @@ public class CedictServiceImpl implements CedictService {
                 if (!m.matches()) {
                     continue;
                 }
-                String traditional = m.group(1);
-                String simplified = m.group(2);
-                String numbered = m.group(3);
-                List<String> definitions = List.of(m.group(4).split("/"));
-                CedictEntry entry = new CedictEntry(traditional, simplified, numbered,
-                        PinyinUtils.numberedToMarked(numbered, false), definitions);
-                simp.computeIfAbsent(simplified, k -> new ArrayList<>(2)).add(entry);
-                trad.computeIfAbsent(traditional, k -> new ArrayList<>(2)).add(entry);
-                pin.computeIfAbsent(PinyinUtils.normalizeKey(numbered), k -> new ArrayList<>(4)).add(entry);
-                indexEnglish(eng, entry);
-                count++;
+                int i = simp.size();
+                String s = m.group(2);
+                String t = m.group(1);
+                simp.add(s);
+                trad.add(t.equals(s) ? null : t);
+                num.add(m.group(3));
+                String joined = m.group(4);
+                defs.add(joined);
+                mSimp.computeIfAbsent(s, k -> new IntList()).add(i);
+                mTrad.computeIfAbsent(t, k -> new IntList()).add(i);
+                mPin.computeIfAbsent(PinyinUtils.normalizeKey(m.group(3)), k -> new IntList()).add(i);
+                indexEnglish(mEng, joined, i);
             }
         } catch (IOException e) {
             throw new UncheckedIOException("Không nạp được từ điển CC-CEDICT từ " + RESOURCE, e);
         }
 
-        bySimplified = simp;
-        bySimplifiedSorted = new TreeMap<>(simp);
-        byTraditional = trad;
-        byPinyinKey = pin;
-        byEnglishWord = eng;
-        size = count;
-        // Mở khoá ngay tại đây để cả đường nạp nền lẫn gọi đồng bộ trong test đều dùng được.
+        simplified = simp.toArray(new String[0]);
+        traditional = trad.toArray(new String[0]);
+        numbered = num.toArray(new String[0]);
+        defsJoined = defs.toArray(new String[0]);
+        bySimplified = freeze(mSimp);
+        bySimplifiedSorted = new TreeMap<>(bySimplified);
+        byTraditional = freeze(mTrad);
+        byPinyinKey = freeze(mPin);
+        byEnglishWord = freeze(mEng);
+        size = simplified.length;
         loaded.countDown();
         log.info("Đã nạp CC-CEDICT: {} mục, {} khoá pinyin, {} từ tiếng Anh, {} ms",
-                count, pin.size(), eng.size(), (System.nanoTime() - started) / 1_000_000);
+                size, byPinyinKey.size(), byEnglishWord.size(), (System.nanoTime() - started) / 1_000_000);
     }
 
-    /** Mỗi từ tiếng Anh (≥ 2 chữ cái, chữ thường, bỏ ngoặc và CL:) trong nghĩa trỏ tới mục. */
-    private static void indexEnglish(Map<String, List<CedictEntry>> eng, CedictEntry entry) {
+    private static Map<String, int[]> freeze(Map<String, IntList> src) {
+        Map<String, int[]> out = new HashMap<>(src.size() * 4 / 3 + 1);
+        for (Map.Entry<String, IntList> e : src.entrySet()) {
+            out.put(e.getKey(), e.getValue().toArray());
+        }
+        return out;
+    }
+
+    /** Mỗi từ tiếng Anh (≥ 2 chữ cái, chữ thường, bỏ ngoặc và CL:) trong nghĩa trỏ tới chỉ số mục. */
+    private static void indexEnglish(Map<String, IntList> eng, String joined, int index) {
         Set<String> seen = new HashSet<>();
-        for (String definition : entry.definitions()) {
+        for (String definition : joined.split("/")) {
             if (definition.startsWith("CL:")) {
                 continue;
             }
             String cleaned = PAREN.matcher(definition).replaceAll(" ").toLowerCase(Locale.ROOT);
             for (String token : NON_LETTER.split(cleaned)) {
                 if (token.length() >= 2 && seen.add(token)) {
-                    eng.computeIfAbsent(token, k -> new ArrayList<>(4)).add(entry);
+                    eng.computeIfAbsent(token, k -> new IntList()).add(index);
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------------------ dựng mục khi trả về
+
+    private CedictEntry entry(int i) {
+        String s = simplified[i];
+        String t = traditional[i] == null ? s : traditional[i];
+        return new CedictEntry(t, s, numbered[i], PinyinUtils.numberedToMarked(numbered[i], false),
+                List.of(defsJoined[i].split("/")));
+    }
+
+    private List<CedictEntry> entries(int[] ids) {
+        List<CedictEntry> out = new ArrayList<>(ids.length);
+        for (int i : ids) {
+            out.add(entry(i));
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------ API
@@ -181,8 +227,7 @@ public class CedictServiceImpl implements CedictService {
         if (simplified == null || simplified.isBlank()) {
             return List.of();
         }
-        List<CedictEntry> found = bySimplified.get(simplified.trim());
-        return found == null ? List.of() : Collections.unmodifiableList(found);
+        return entries(bySimplified.getOrDefault(simplified.trim(), EMPTY));
     }
 
     @Override
@@ -192,15 +237,12 @@ public class CedictServiceImpl implements CedictService {
         if (key.isEmpty()) {
             return List.of();
         }
-        List<CedictEntry> found = byPinyinKey.get(key);
+        int[] found = byPinyinKey.get(key);
         if (found == null) {
             return List.of();
         }
         Set<String> inSystem = systemWords();
-        return found.stream()
-                .sorted(rankComparator(inSystem))
-                .limit(Math.max(1, limit))
-                .toList();
+        return entries(rank(found, inSystem, null, Math.max(1, limit)));
     }
 
     @Override
@@ -212,37 +254,36 @@ public class CedictServiceImpl implements CedictService {
         String query = q.trim();
         int max = Math.max(1, limit);
         Set<String> inSystem = systemWords();
-
         if (query.codePoints().anyMatch(PinyinUtils::isCjk)) {
-            return searchChinese(query, max, inSystem);
+            return entries(searchChinese(query, max, inSystem));
         }
-        return searchEnglish(query.toLowerCase(Locale.ROOT), max, inSystem);
+        return entries(searchEnglish(query.toLowerCase(Locale.ROOT), max, inSystem));
     }
 
-    private List<CedictEntry> searchChinese(String query, int max, Set<String> inSystem) {
-        LinkedHashSet<CedictEntry> out = new LinkedHashSet<>();
-        List<CedictEntry> exact = bySimplified.get(query);
-        if (exact != null) {
-            out.addAll(exact);
+    private int[] searchChinese(String query, int max, Set<String> inSystem) {
+        LinkedHashSet<Integer> out = new LinkedHashSet<>();
+        for (int i : bySimplified.getOrDefault(query, EMPTY)) {
+            out.add(i);
         }
-        List<CedictEntry> exactTrad = byTraditional.get(query);
-        if (exactTrad != null) {
-            out.addAll(exactTrad);
+        for (int i : byTraditional.getOrDefault(query, EMPTY)) {
+            out.add(i);
         }
-        // Tiền tố giản thể: duyệt subMap của TreeMap, dừng sớm khi đủ.
-        for (Map.Entry<String, List<CedictEntry>> e : bySimplifiedSorted.tailMap(query, true).entrySet()) {
+        for (Map.Entry<String, int[]> e : bySimplifiedSorted.tailMap(query, true).entrySet()) {
             if (!e.getKey().startsWith(query)) {
                 break;
             }
-            out.addAll(e.getValue());
+            for (int i : e.getValue()) {
+                out.add(i);
+            }
             if (out.size() >= max * 4) {
                 break;
             }
         }
-        return out.stream().sorted(rankComparator(inSystem)).limit(max).toList();
+        int[] ids = out.stream().mapToInt(Integer::intValue).toArray();
+        return rank(ids, inSystem, null, max);
     }
 
-    private List<CedictEntry> searchEnglish(String query, int max, Set<String> inSystem) {
+    private int[] searchEnglish(String query, int max, Set<String> inSystem) {
         List<String> tokens = new ArrayList<>();
         for (String token : NON_LETTER.split(query)) {
             if (token.length() >= 2) {
@@ -250,48 +291,114 @@ public class CedictServiceImpl implements CedictService {
             }
         }
         if (tokens.isEmpty()) {
-            return List.of();
+            return EMPTY;
         }
-        // Giao của các tập theo từng từ; bắt đầu từ tập nhỏ nhất để rẻ.
-        tokens.sort(Comparator.comparingInt(t -> byEnglishWord.getOrDefault(t, List.of()).size()));
-        List<CedictEntry> base = byEnglishWord.get(tokens.get(0));
-        if (base == null) {
-            return List.of();
+        tokens.sort(Comparator.comparingInt(t -> byEnglishWord.getOrDefault(t, EMPTY).length));
+        int[] candidates = byEnglishWord.get(tokens.get(0));
+        if (candidates == null) {
+            return EMPTY;
         }
-        List<CedictEntry> candidates = base;
-        for (int i = 1; i < tokens.size(); i++) {
-            List<CedictEntry> other = byEnglishWord.get(tokens.get(i));
+        for (int k = 1; k < tokens.size(); k++) {
+            int[] other = byEnglishWord.get(tokens.get(k));
             if (other == null) {
-                return List.of();
+                return EMPTY;
             }
-            Set<CedictEntry> otherSet = new HashSet<>(other);
-            candidates = candidates.stream().filter(otherSet::contains).toList();
-            if (candidates.isEmpty()) {
-                return List.of();
+            candidates = intersectSorted(candidates, other);
+            if (candidates.length == 0) {
+                return EMPTY;
             }
         }
-        final String phrase = String.join(" ", tokens);
-        Comparator<CedictEntry> byMatch = Comparator.comparingInt(e -> englishMatchRank(e, phrase));
-        return candidates.stream()
-                .sorted(byMatch.thenComparing(rankComparator(inSystem)))
-                .limit(max)
-                .toList();
+        return rank(candidates, inSystem, String.join(" ", tokens), max);
     }
 
-    /** 0 = một nghĩa bằng đúng cụm; 1 = một nghĩa bắt đầu bằng cụm; 2 = chỉ chứa. */
-    private static int englishMatchRank(CedictEntry entry, String phrase) {
-        int best = 2;
-        for (String definition : entry.definitions()) {
-            String d = PAREN.matcher(definition).replaceAll(" ").toLowerCase(Locale.ROOT).trim()
-                    .replaceAll("\\s+", " ");
-            if (d.equals(phrase) || d.equals("to " + phrase)) {
-                return 0;
-            }
-            if (d.startsWith(phrase) || d.startsWith("to " + phrase)) {
-                best = Math.min(best, 1);
+    /** Giao hai mảng chỉ số đã tăng dần (chỉ số được thêm theo thứ tự đọc file nên luôn tăng). */
+    private static int[] intersectSorted(int[] a, int[] b) {
+        int[] out = new int[Math.min(a.length, b.length)];
+        int i = 0, j = 0, n = 0;
+        while (i < a.length && j < b.length) {
+            if (a[i] == b[j]) {
+                out[n++] = a[i];
+                i++;
+                j++;
+            } else if (a[i] < b[j]) {
+                i++;
+            } else {
+                j++;
             }
         }
+        return Arrays.copyOf(out, n);
+    }
+
+    // ------------------------------------------------------------------ xếp hạng
+
+    /**
+     * Xếp hạng: (khớp nghĩa tiếng Anh nếu có cụm) → có trong hệ thống → không phải mục biến thể/hiếm →
+     * chữ ngắn hơn. Trả tối đa {@code max} chỉ số.
+     */
+    private int[] rank(int[] ids, Set<String> inSystem, String phrase, int max) {
+        Integer[] boxed = new Integer[ids.length];
+        for (int k = 0; k < ids.length; k++) {
+            boxed[k] = ids[k];
+        }
+        Comparator<Integer> cmp = Comparator.comparingInt((Integer i) -> phrase == null ? 0 : englishMatchRank(i, phrase))
+                .thenComparingInt(i -> inSystem.contains(simplified[i]) ? 0 : 1)
+                .thenComparingInt(this::lowValueRank)
+                .thenComparingInt(i -> simplified[i].codePointCount(0, simplified[i].length()));
+        Arrays.sort(boxed, cmp);
+        int n = Math.min(max, boxed.length);
+        int[] out = new int[n];
+        for (int k = 0; k < n; k++) {
+            out[k] = boxed[k];
+        }
+        return out;
+    }
+
+    /**
+     * 0 = NGHĨA ĐẦU TIÊN bằng đúng cụm (nghĩa chính của từ); 1 = một nghĩa phụ bằng đúng cụm;
+     * 2 = một nghĩa bắt đầu bằng cụm; 3 = chỉ chứa. Nhờ vậy 图书馆 ("library") xếp trên 库
+     * ("warehouse/storehouse/(file) library") dù 库 ngắn hơn.
+     */
+    private int englishMatchRank(int i, String phrase) {
+        int best = 5;
+        int position = 0;
+        for (String definition : defsJoined[i].split("/")) {
+            if (definition.startsWith("CL:")) {
+                continue;
+            }
+            String raw = definition.toLowerCase(Locale.ROOT).trim().replaceAll("\\s+", " ");
+            String d = PAREN.matcher(raw).replaceAll(" ").trim().replaceAll("\\s+", " ");
+            boolean exactRaw = raw.equals(phrase) || raw.equals("to " + phrase);
+            boolean exactStripped = d.equals(phrase) || d.equals("to " + phrase);
+            if (exactRaw) {
+                // "library" nguyên văn ở nghĩa đầu = nghĩa chính, tổng quát nhất
+                return position == 0 ? 0 : Math.min(best, 2);
+            }
+            if (exactStripped) {
+                // "library (partition on computer hard disk)" — đúng từ nhưng có chú thích thu hẹp
+                best = Math.min(best, position == 0 ? 1 : 3);
+            } else if (d.startsWith(phrase) || d.startsWith("to " + phrase)) {
+                best = Math.min(best, 4);
+            }
+            position++;
+        }
         return best;
+    }
+
+    private int lowValueRank(int i) {
+        String all = defsJoined[i].toLowerCase(Locale.ROOT);
+        int slash = all.indexOf('/');
+        String first = slash < 0 ? all : all.substring(0, slash);
+        for (String prefix : LOW_VALUE_PREFIXES) {
+            if (first.startsWith(prefix)) {
+                return 1;
+            }
+        }
+        for (String needle : LOW_VALUE_ANYWHERE) {
+            if (all.contains(needle)) {
+                return 1;
+            }
+        }
+        return 0;
     }
 
     @Override
@@ -327,28 +434,6 @@ public class CedictServiceImpl implements CedictService {
         return size;
     }
 
-    // ------------------------------------------------------------------ xếp hạng
-
-    private Comparator<CedictEntry> rankComparator(Set<String> inSystem) {
-        return Comparator
-                .comparingInt((CedictEntry e) -> inSystem.contains(e.simplified()) ? 0 : 1)
-                .thenComparingInt(CedictServiceImpl::lowValueRank)
-                .thenComparingInt(e -> e.simplified().codePointCount(0, e.simplified().length()));
-    }
-
-    private static int lowValueRank(CedictEntry entry) {
-        if (entry.definitions().isEmpty()) {
-            return 1;
-        }
-        String first = entry.definitions().get(0).toLowerCase(Locale.ROOT);
-        for (String prefix : LOW_VALUE_PREFIXES) {
-            if (first.startsWith(prefix)) {
-                return 1;
-            }
-        }
-        return 0;
-    }
-
     /** Tập chữ giản thể đang có trong hệ thống, làm mới lười mỗi 10 phút. */
     private Set<String> systemWords() {
         Instant now = Instant.now();
@@ -360,7 +445,6 @@ public class CedictServiceImpl implements CedictService {
                                 .map(Word::getSimplified)
                                 .collect(Collectors.toUnmodifiableSet());
                     } catch (RuntimeException e) {
-                        // Không có DB (ví dụ trong test) thì xếp hạng không dùng tiêu chí này.
                         log.warn("Không đọc được bảng words để xếp hạng từ điển: {}", e.getMessage());
                         systemWords = Set.of();
                     }
@@ -369,5 +453,22 @@ public class CedictServiceImpl implements CedictService {
             }
         }
         return systemWords;
+    }
+
+    /** Danh sách int tăng trưởng, gọn hơn ArrayList&lt;Integer&gt; khi nạp. */
+    private static final class IntList {
+        private int[] data = new int[2];
+        private int n;
+
+        void add(int v) {
+            if (n == data.length) {
+                data = Arrays.copyOf(data, n * 2);
+            }
+            data[n++] = v;
+        }
+
+        int[] toArray() {
+            return Arrays.copyOf(data, n);
+        }
     }
 }

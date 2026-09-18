@@ -31,7 +31,8 @@ USER app
 EXPOSE 8080
 
 # Render free (512 MB): gioi han heap theo % RAM container, SerialGC de tiet kiem bo nho
-ENV JAVA_OPTS="-XX:MaxRAMPercentage=75 -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k"
+# May chu 512 MB: heap toi da 40% RAM (~200 MB), C1 JIT, SerialGC; vuot bo nho thi thoat de Render khoi dong lai sach.
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=40 -XX:ReservedCodeCacheSize=40m -XX:MaxDirectMemorySize=16m -Xss512k -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:+ExitOnOutOfMemoryError"
 # Locale UTF-8 de log co tieng Viet / Han tu khong bi in thanh "?" (busybox mac dinh POSIX)
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 

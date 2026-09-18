@@ -69,6 +69,14 @@ class CedictServiceImplTest {
     }
 
     @Test
+    void tim_tieng_Anh_uu_tien_nghia_chinh_va_tu_thong_dung() {
+        // "library": 图书馆 (nghĩa đầu = library) phải đứng trước 库 (library là nghĩa thứ 3)
+        // và trước 圕 (dạng rút gọn hiếm, "contracted form of ...").
+        List<CedictEntry> found = service.search("library", 5);
+        assertThat(found.get(0).simplified()).isEqualTo("图书馆");
+    }
+
+    @Test
     void tim_cum_tieng_Anh_hai_tu() {
         List<CedictEntry> found = service.search("go home", 10);
         assertThat(found).isNotEmpty();

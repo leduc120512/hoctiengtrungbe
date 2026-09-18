@@ -54,6 +54,9 @@ app:
 
 server:
   port: ${PORT:8080}                # Render cap PORT; local mac dinh 8080
+  tomcat:
+    threads:
+      max: ${TOMCAT_MAX_THREADS:16}     # site ca nhan, may chu 512 MB: it thread de tiet kiem bo nho
   # Sau reverse proxy cua Render (TLS ket thuc o proxy, app nhan HTTP + X-Forwarded-Proto):
   # "framework" = ForwardedHeaderFilter -> URL sinh ra (Swagger "Try it out", redirect) dung https.
   # Local khong co proxy thi header nay khong ton tai, khong anh huong.
