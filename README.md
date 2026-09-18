@@ -350,6 +350,8 @@ Repo đã có sẵn `Dockerfile` (multi-stage, JRE Alpine, không chạy root), 
 | `DB_POOL_SIZE` | | số connection tối đa của Hikari, mặc định `5` (host MySQL free thường giới hạn 10–20 connection) |
 | `PORT` | | cổng HTTP, mặc định `8080` — **Render tự cấp**, không cần đặt |
 | `JWT_SECRET` | ✔ | khoá ký JWT, **tối thiểu 32 byte** (app fail-fast nếu ngắn hơn) |
+| `ADMIN_PASSWORD` | ✔ (production) | mật khẩu mới cho `admin@hoctiengtrung.vn` (≥ 8 ký tự). Lúc khởi động app tự đổi mật khẩu admin theo biến này và thu hồi token cũ; **không đặt** thì admin vẫn dùng `Admin@123` công khai trong README và app ghi cảnh báo |
+| `DEMO_ACCOUNT_ENABLED` | | `false` ⇒ khoá tài khoản `demo@hoctiengtrung.vn` (nên đặt trên production) |
 | `CORS_ALLOWED_ORIGINS` | ✔ | domain FE, cách nhau bằng dấu phẩy, ví dụ `https://ten-app.vercel.app,http://localhost:5173` |
 | `GEMINI_API_KEY` | | **khoá miễn phí** từ Google AI Studio cho tính năng "Tạo câu mới bằng AI" (xem 14.7). Bỏ trống và không có `ANTHROPIC_API_KEY` ⇒ `GET /api/v1/ai/status` trả `enabled=false`, `POST /me/sentences/generate` trả 503 `AI_DISABLED`; phần còn lại của API vẫn chạy bình thường |
 | `ANTHROPIC_API_KEY` | | khoá Claude (trả phí) — nếu có thì được ưu tiên hơn Gemini khi `AI_PROVIDER=auto` |

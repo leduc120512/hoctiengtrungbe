@@ -51,6 +51,8 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       AI_PROVIDER: ${AI_PROVIDER:-auto}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      DEMO_ACCOUNT_ENABLED: ${DEMO_ACCOUNT_ENABLED:-true}
       AI_MODEL: ${AI_MODEL:-claude-opus-5}
       AI_EFFORT: ${AI_EFFORT:-medium}
     ports:
