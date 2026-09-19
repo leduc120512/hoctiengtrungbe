@@ -385,7 +385,7 @@ Repo đã có sẵn `Dockerfile` (multi-stage, JRE Alpine, không chạy root), 
 | `GEMINI_API_KEY` | | **khoá miễn phí** từ Google AI Studio cho "Tạo câu mới bằng AI" và "Điền bằng AI" ở phần thêm từ (xem 14.7). Bỏ trống và không có `ANTHROPIC_API_KEY` ⇒ `GET /api/v1/ai/status` trả `enabled=false`, `POST /me/sentences/generate` trả 503 `AI_DISABLED`; phần còn lại của API vẫn chạy bình thường |
 | `ANTHROPIC_API_KEY` | | khoá Claude (trả phí) — nếu có thì được ưu tiên hơn Gemini khi `AI_PROVIDER=auto` |
 | `AI_PROVIDER` | | `auto` (mặc định) · `claude` · `gemini` · `off` |
-| `AI_MODEL` / `GEMINI_MODEL` / `AI_EFFORT` | | mặc định `claude-opus-5` / `gemini-2.5-flash` / `medium` |
+| `AI_MODEL` / `GEMINI_MODEL` / `AI_EFFORT` | | mặc định `claude-opus-5` / `gemini-3.6-flash` / `medium` |
 | `JAVA_OPTS` | | mặc định `-XX:MaxRAMPercentage=75 -XX:+UseSerialGC` (vừa gói 512 MB của Render) |
 
 Health check: `GET /actuator/health` (công khai, không cần token) — Render dùng đường dẫn này
@@ -487,7 +487,7 @@ Anthropic không có gói miễn phí, nhưng **Google AI Studio cấp API key m
 1. Vào <https://aistudio.google.com/apikey>, đăng nhập Google, bấm **Create API key**.
 2. Trên Render: *Environment → Add Environment Variable* → `GEMINI_API_KEY` = khoá vừa tạo → Save
    (Render tự deploy lại). Local: `$env:GEMINI_API_KEY="..."` trước khi chạy.
-3. Kiểm tra: `GET /api/v1/ai/status` phải trả `{"enabled":true,"provider":"gemini","model":"gemini-2.5-flash"}`.
+3. Kiểm tra: `GET /api/v1/ai/status` phải trả `{"enabled":true,"provider":"gemini","model":"gemini-3.6-flash"}`.
 
 Cách chọn provider (`AI_PROVIDER`): `auto` dùng Claude nếu có `ANTHROPIC_API_KEY`, không thì Gemini nếu
 có `GEMINI_API_KEY`, không thì tắt. Cả hai provider dùng **cùng một prompt** và kết quả đều đi qua

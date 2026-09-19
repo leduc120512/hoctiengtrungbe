@@ -115,7 +115,7 @@ tức thì nhờ bản chụp trong máy, kèm "Đang cập nhật từ máy ch�
 1. <https://aistudio.google.com/apikey> → đăng nhập Google → **Create API key** → copy.
 2. Render → **Environment** → thêm `GEMINI_API_KEY` = key vừa copy → **Save Changes**.
 3. Chờ khởi động lại, mở `https://<url-render>/api/v1/ai/status` ngay trên trình duyệt (không cần token) →
-   `{"enabled":true,"provider":"gemini","model":"gemini-2.5-flash"}`.
+   `{"enabled":true,"provider":"gemini","model":"gemini-3.6-flash"}`.
 
 **Kiểm tra:** Vercel → Câu của tôi → **Nghe câu** → **Tạo câu mới bằng AI** → sau 10–20 giây có câu mới,
 gắn nhãn *AI*, ghép từ vốn từ đã học và ưu tiên 10 từ mới nhất. Thông báo cho biết bao nhiêu câu bị loại vì

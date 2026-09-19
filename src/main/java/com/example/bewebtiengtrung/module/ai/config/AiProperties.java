@@ -41,7 +41,7 @@ public class AiProperties {
     private String geminiApiKey = "";
 
     /** Model Gemini dùng để sinh câu (free tier). */
-    private String geminiModel = "gemini-2.5-flash";
+/f    private String geminiModel = "gemini-3.6-flash";
 
     /** Model Claude dùng để sinh câu. */
     private String model = "claude-opus-5";

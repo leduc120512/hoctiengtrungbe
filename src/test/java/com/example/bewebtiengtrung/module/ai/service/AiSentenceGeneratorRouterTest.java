@@ -23,7 +23,7 @@ class AiSentenceGeneratorRouterTest {
         when(claude.isEnabled()).thenReturn(claudeKey);
         when(claude.model()).thenReturn("claude-opus-5");
         when(gemini.isEnabled()).thenReturn(geminiKey);
-        when(gemini.model()).thenReturn("gemini-2.5-flash");
+        when(gemini.model()).thenReturn("gemini-3.6-flash");
         return new AiSentenceGeneratorRouter(props, claude, gemini);
     }
 
@@ -39,7 +39,7 @@ class AiSentenceGeneratorRouterTest {
     void auto_roi_ve_gemini_khi_chi_co_gemini_key() {
         AiSentenceGeneratorRouter r = router("auto", false, true);
         assertThat(r.activeProvider()).isEqualTo(AiSentenceGeneratorRouter.Provider.GEMINI);
-        assertThat(r.model()).isEqualTo("gemini-2.5-flash");
+        assertThat(r.model()).isEqualTo("gemini-3.6-flash");
     }
 
     @Test

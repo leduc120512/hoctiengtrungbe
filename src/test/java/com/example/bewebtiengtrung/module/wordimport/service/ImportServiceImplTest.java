@@ -184,7 +184,7 @@ class ImportServiceImplTest {
         @BeforeEach
         void aiOn() {
             when(wordCompleter.isEnabled()).thenReturn(true);
-            when(wordCompleter.model()).thenReturn("gemini-2.5-flash");
+            when(wordCompleter.model()).thenReturn("gemini-3.6-flash");
             UserWordResponse learned = new UserWordResponse(1L, 10L, "你好", "你好", "nǐ hǎo", "xin chào", null,
                     1, null, UserWordStatus.LEARNED, null, java.time.Instant.EPOCH);
             when(userWordService.list(eq(USER_ID), isNull(), isNull(), isNull(), any(Pageable.class)))
@@ -203,7 +203,7 @@ class ImportServiceImplTest {
 
             ImportAiResponse res = service.completeWithAi(USER_ID, new ImportAiRequest("học\nxin chào", 2));
 
-            assertThat(res.model()).isEqualTo("gemini-2.5-flash");
+            assertThat(res.model()).isEqualTo("gemini-3.6-flash");
             assertThat(res.aiWords()).isEqualTo(3);
             assertThat(res.preview().rows()).hasSize(2);
             ImportPreviewRow first = res.preview().rows().get(0);

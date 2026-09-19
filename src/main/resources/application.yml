@@ -55,7 +55,7 @@ app:
     # provider: auto = Claude neu co ANTHROPIC_API_KEY, khong thi Gemini neu co GEMINI_API_KEY (mien phi), khong thi tat.
     provider: ${AI_PROVIDER:auto}
     model: ${AI_MODEL:claude-opus-5}
-    gemini-model: ${GEMINI_MODEL:gemini-2.5-flash}
+    gemini-model: ${GEMINI_MODEL:gemini-3.6-flash}
     effort: ${AI_EFFORT:medium}
     max-tokens: 16000
     timeout-seconds: 120

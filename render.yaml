@@ -41,6 +41,6 @@ services:
       - key: AI_PROVIDER
         value: auto
       - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+        value: gemini-3.6-flash
       - key: JAVA_OPTS
         value: -XX:MaxRAMPercentage=40 -XX:ReservedCodeCacheSize=40m -XX:MaxDirectMemorySize=16m -Xss512k -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:+ExitOnOutOfMemoryError

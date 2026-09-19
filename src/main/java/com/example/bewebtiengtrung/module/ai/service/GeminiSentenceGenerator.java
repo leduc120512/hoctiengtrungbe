@@ -141,7 +141,7 @@ public class GeminiSentenceGenerator implements AiSentenceGenerator, AiWordCompl
                     .retrieve()
                     .body(String.class);
         } catch (RestClientResponseException e) {
-            throw mapHttpError(e);
+            throw mapHttpError(e, props.getGeminiModel());
         } catch (ResourceAccessException e) {
             throw new ApiException(HttpStatus.GATEWAY_TIMEOUT, "AI_TIMEOUT",
                     "Không kết nối được tới Gemini hoặc quá thời gian chờ");
@@ -154,15 +154,22 @@ public class GeminiSentenceGenerator implements AiSentenceGenerator, AiWordCompl
     }
 
     /** Ánh xạ mã HTTP của Google thành lỗi có ý nghĩa cho người dùng; không lộ body chứa key. */
-    private static ApiException mapHttpError(RestClientResponseException e) {
+    static ApiException mapHttpError(RestClientResponseException e, String model) {
         int status = e.getStatusCode().value();
         if (status == 429) {
             return new ApiException(HttpStatus.TOO_MANY_REQUESTS, "AI_RATE_LIMIT",
                     "AI đang quá tải (hết hạn mức free tier), thử lại sau ít phút");
         }
-        if (status == 400 || status == 401 || status == 403 || status == 404) {
+        // 404 là model sai hoặc Google đã ngừng cấp model đó cho tài khoản mới — key vẫn tốt,
+        // chỉ cần đổi GEMINI_MODEL. Không gộp với lỗi key để người dùng khỏi đi tạo key mới vô ích.
+        if (status == 404) {
             return new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI_CONFIG",
-                    "GEMINI_API_KEY không hợp lệ hoặc model không tồn tại (HTTP " + status + ")");
+                    "Model Gemini \"" + model + "\" không tồn tại hoặc không còn dùng được cho tài khoản này"
+                            + " — đổi biến GEMINI_MODEL (vd. gemini-3.6-flash) trên máy chủ (HTTP 404)");
+        }
+        if (status == 400 || status == 401 || status == 403) {
+            return new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI_CONFIG",
+                    "GEMINI_API_KEY không hợp lệ hoặc chưa được bật (HTTP " + status + ")");
         }
         return new ApiException(HttpStatus.BAD_GATEWAY, "AI_UPSTREAM", "Lỗi từ dịch vụ Gemini (HTTP " + status + ")");
     }
