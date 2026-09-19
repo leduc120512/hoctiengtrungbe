@@ -212,7 +212,7 @@ Tất cả dưới tiền tố `/api/v1`. File [api.http](api.http) chứa sẵn
 | POST | `/me/words/import/confirm` | ghi các dòng đã duyệt, đánh dấu đã học |
 | GET | `/me/sentences` | mọi câu, xếp theo cấp |
 | POST | `/me/sentences/bulk` | thêm câu tự dán (`MANUAL`) |
-| POST | `/me/sentences/generate` | `{count, level?, focusWords?}` — AI ghép từ đã học thành câu MỚI; máy chủ loại câu dùng chữ lạ, câu trùng (`hanzi_key`) và câu chỉ là câu đã có đổi chỗ chữ (`SentenceText.bagKey`, đếm ở `reordered`); `focusWords` là nhóm từ mới mà mỗi câu phải chứa ít nhất một từ |
+| POST | `/me/sentences/generate` | `{count, level?, focusWords?, replaceAi?}` — AI ghép từ đã học thành câu MỚI; máy chủ loại câu dùng chữ lạ, câu trùng (`hanzi_key`) và câu chỉ là câu đã có đổi chỗ chữ (`SentenceText.bagKey`, đếm ở `reordered`); `focusWords` là nhóm từ mới mà mỗi câu phải chứa ít nhất một từ; `replaceAi: true` xoá hết câu AI cũ trong cùng giao dịch lưu bộ mới (chỉ khi bộ mới có ≥ 1 câu; số câu đã bỏ trả ở `replaced`) — để phần Nghe câu luôn là bộ mới thay vì kho phình ra |
 | DELETE | `/me/sentences/{id}`, `/me/sentences?source=` | xoá một câu / mọi câu `MANUAL` hoặc `AI` |
 | GET | `/ai/status` | `{enabled, provider, model, reason}` |
 

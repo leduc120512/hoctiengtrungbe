@@ -13,6 +13,7 @@ import java.util.List;
  * @param sentences       các câu vừa lưu
  * @param rejectedSamples tối đa 5 câu bị loại kèm chữ lạ, dạng "他很高兴。 (lạ: 高兴)"
  * @param model           tên model AI đã dùng
+ * @param replaced        số câu AI cũ đã bỏ để nhường chỗ cho bộ mới (0 khi không yêu cầu thay hoặc đợt mới rỗng)
  */
 public record GenerateSentencesResponse(
         int requested,
@@ -20,6 +21,7 @@ public record GenerateSentencesResponse(
         int rejected,
         int duplicates,
         int reordered,
+        int replaced,
         List<SentenceResponse> sentences,
         List<String> rejectedSamples,
         String model

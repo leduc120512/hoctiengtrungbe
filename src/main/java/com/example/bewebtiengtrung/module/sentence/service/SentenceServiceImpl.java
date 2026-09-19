@@ -271,10 +271,14 @@ public class SentenceServiceImpl implements SentenceService {
             }
         }
 
-        // 6. Lưu các câu hợp lệ với source = AI — trong một giao dịch ngắn riêng.
+        // 6. Lưu các câu hợp lệ với source = AI — trong một giao dịch ngắn riêng. Nếu người dùng muốn
+        //    THAY bộ AI cũ thì xoá nó ngay trước khi lưu, cùng giao dịch: hoặc có bộ mới thế chỗ, hoặc
+        //    không mất gì. Đợt mới rỗng thì giữ nguyên bộ cũ — người học còn câu để nghe trong lúc thử lại.
         final Integer requestedLevel = request.level();
         final List<GeneratedSentence> toSave = List.copyOf(accepted);
-        List<UserSentence> saved = transactionTemplate.execute(status -> {
+        final boolean replace = request.wantsReplace() && !toSave.isEmpty();
+        SaveOutcome outcome = transactionTemplate.execute(status -> {
+            int replaced = replace ? sentenceRepository.deleteByUserIdAndSource(userId, SentenceSource.AI) : 0;
             User userRef = entityManager.getReference(User.class, userId);
             Instant now = Instant.now();
             List<UserSentence> entities = new ArrayList<>(toSave.size());
@@ -293,17 +297,21 @@ public class SentenceServiceImpl implements SentenceService {
                         .createdAt(now)
                         .build());
             }
-            return sentenceRepository.saveAll(entities);
+            return new SaveOutcome(sentenceRepository.saveAll(entities), replaced);
         });
-        if (saved == null) {
-            saved = List.of();
-        }
+        List<UserSentence> saved = outcome == null || outcome.saved() == null ? List.of() : outcome.saved();
+        int replaced = outcome == null ? 0 : outcome.replaced();
         List<SentenceResponse> responses = saved.stream().map(sentenceMapper::toResponse).toList();
 
-        log.info("AI sinh câu cho user {}: yêu cầu {}, lưu {}, loại {} (chữ lạ), trùng {}, đổi chỗ {}, {} lần gọi",
-                userId, count, saved.size(), rejected, duplicates, reordered, calls);
-        return new GenerateSentencesResponse(count, saved.size(), rejected, duplicates, reordered,
+        log.info("AI sinh câu cho user {}: yêu cầu {}, lưu {}, loại {} (chữ lạ), trùng {}, đổi chỗ {}, "
+                        + "bỏ {} câu AI cũ, {} lần gọi",
+                userId, count, saved.size(), rejected, duplicates, reordered, replaced, calls);
+        return new GenerateSentencesResponse(count, saved.size(), rejected, duplicates, reordered, replaced,
                 responses, List.copyOf(rejectedSamples), aiGenerator.model());
+    }
+
+    /** Kết quả bước lưu của {@link #generate}: các câu vừa ghi và số câu AI cũ đã bỏ. */
+    private record SaveOutcome(List<UserSentence> saved, int replaced) {
     }
 
     /** Ứng viên phải có đủ ba trường, có chữ Hán và không vượt độ dài cột. */

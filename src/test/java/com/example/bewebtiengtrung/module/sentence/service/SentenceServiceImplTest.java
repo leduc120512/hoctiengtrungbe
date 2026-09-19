@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -50,6 +51,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -139,7 +141,7 @@ class SentenceServiceImplTest {
     }
 
     private static GenerateSentencesRequest request(int count, Integer level) {
-        return new GenerateSentencesRequest(count, level, null);
+        return new GenerateSentencesRequest(count, level, null, null);
     }
 
     // ------------------------------------------------------------------
@@ -227,7 +229,7 @@ class SentenceServiceImplTest {
             when(aiGenerator.generate(anyList(), anyList(), anyInt(), any(), any()))
                     .thenReturn(List.of(gs("他是老师。", 1)));
 
-            service.generate(USER_ID, new GenerateSentencesRequest(1, null, List.of("老师", "学生")));
+            service.generate(USER_ID, new GenerateSentencesRequest(1, null, List.of("老师", "学生"), null));
 
             verify(aiGenerator).generate(anyList(), anyList(), eq(1), isNull(), eq(List.of("老师", "学生")));
         }
@@ -330,7 +332,7 @@ class SentenceServiceImplTest {
             when(aiGenerator.generate(anyList(), anyList(), anyInt(), any(), any()))
                     .thenReturn(List.of(gs("你好吗？", 1)));
 
-            service.generate(USER_ID, new GenerateSentencesRequest(1, 2, List.of("你")));
+            service.generate(USER_ID, new GenerateSentencesRequest(1, 2, List.of("你"), null));
 
             ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.captor();
             verify(userWordService).list(eq(USER_ID), isNull(), isNull(), isNull(), pageableCaptor.capture());
@@ -354,6 +356,49 @@ class SentenceServiceImplTest {
             // Reset kho: câu vừa lưu không nằm trong DB giả nên vẫn tạo lại được
             GenerateSentencesResponse free = service.generate(USER_ID, request(1, null));
             assertThat(free.sentences().get(0).level()).isEqualTo(3);
+        }
+
+        @Test
+        @DisplayName("replaceAi=true: xoá hết câu AI cũ TRƯỚC khi lưu bộ mới, trả số câu đã bỏ")
+        void thay_bo_ai_cu() {
+            when(aiGenerator.generate(anyList(), anyList(), anyInt(), any(), any()))
+                    .thenReturn(List.of(gs("你好吗？", 1), gs("他是老师。", 1)));
+            when(sentenceRepository.deleteByUserIdAndSource(USER_ID, SentenceSource.AI)).thenReturn(7);
+
+            GenerateSentencesResponse res =
+                    service.generate(USER_ID, new GenerateSentencesRequest(2, null, null, true));
+
+            assertThat(res.generated()).isEqualTo(2);
+            assertThat(res.replaced()).isEqualTo(7);
+            InOrder order = inOrder(sentenceRepository);
+            order.verify(sentenceRepository).deleteByUserIdAndSource(USER_ID, SentenceSource.AI);
+            order.verify(sentenceRepository).saveAll(anyList());
+        }
+
+        @Test
+        @DisplayName("replaceAi=true nhưng đợt mới rỗng (toàn câu hỏng) ⇒ giữ nguyên bộ cũ, replaced = 0")
+        void khong_xoa_bo_cu_khi_dot_moi_rong() {
+            when(aiGenerator.generate(anyList(), anyList(), anyInt(), any(), any()))
+                    .thenReturn(List.of(gs("他很高兴。", 1))); // chữ lạ ⇒ bị loại
+
+            GenerateSentencesResponse res =
+                    service.generate(USER_ID, new GenerateSentencesRequest(1, null, null, true));
+
+            assertThat(res.generated()).isZero();
+            assertThat(res.replaced()).isZero();
+            verify(sentenceRepository, never()).deleteByUserIdAndSource(any(), any());
+        }
+
+        @Test
+        @DisplayName("replaceAi null/false ⇒ cộng thêm vào kho, không xoá gì")
+        void mac_dinh_khong_thay() {
+            when(aiGenerator.generate(anyList(), anyList(), anyInt(), any(), any()))
+                    .thenReturn(List.of(gs("你好吗？", 1)));
+
+            GenerateSentencesResponse res = service.generate(USER_ID, request(1, null));
+
+            assertThat(res.replaced()).isZero();
+            verify(sentenceRepository, never()).deleteByUserIdAndSource(any(), any());
         }
     }
 
